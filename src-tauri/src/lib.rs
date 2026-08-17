@@ -48,6 +48,8 @@ pub fn run() {
             commands::rollback,
             commands::set_autocommit,
             commands::export_result,
+            commands::build_edit_sql,
+            commands::execute_edit,
             commands::list_projects,
             commands::create_project,
             commands::rename_project,

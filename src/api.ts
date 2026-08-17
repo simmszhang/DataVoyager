@@ -235,6 +235,19 @@ export const api = {
     format: string,
     table?: string | null,
   ) => invoke<string>("export_result", { id, database, sql, format, table }),
+  buildEditSql: (
+    id: number,
+    table: string,
+    pk: [string, CellValue][],
+    set: [string, CellValue][],
+  ) => invoke<string>("build_edit_sql", { id, table, pk, set }),
+  executeEdit: (
+    id: number,
+    database: string | null,
+    table: string,
+    pk: [string, CellValue][],
+    set: [string, CellValue][],
+  ) => invoke<QueryOutput>("execute_edit", { id, database, table, pk, set }),
 
   listProjects: () => invoke<Project[]>("list_projects"),
   createProject: (name: string) => invoke<Project>("create_project", { name }),

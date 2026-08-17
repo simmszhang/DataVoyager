@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, DriverInfo, SavedConnection, StreamEvent } from "./api";
+import { api, CellValue, DriverInfo, SavedConnection, StreamEvent } from "./api";
 import { useStore } from "./store";
 import ConnectionDialog from "./components/ConnectionDialog";
 import SchemaPanel from "./components/SchemaPanel";
@@ -9,6 +9,15 @@ import ResultsGrid from "./components/ResultsGrid";
 import ExportDialog from "./components/ExportDialog";
 import HistoryPanel from "./components/HistoryPanel";
 import "./App.css";
+
+/// 用户输入的编辑值 → CellValue（NULL / 整数 / 浮点 / 字符串）。
+function toCellValue(text: string): CellValue {
+  const t = text.trim();
+  if (t.toUpperCase() === "NULL") return { t: "null" };
+  if (/^-?\d+$/.test(t)) return { t: "i64", v: Number(t) };
+  if (/^-?\d+\.\d+$/.test(t)) return { t: "f64", v: Number(t) };
+  return { t: "str", v: text };
+}
 
 export default function App() {
   const {
@@ -38,6 +47,13 @@ export default function App() {
   } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
+  const [pendingEdit, setPendingEdit] = useState<{
+    sql: string;
+    table: string;
+    database: string | null;
+    pk: [string, CellValue][];
+    set: [string, CellValue][];
+  } | null>(null);
 
   const activeConn = connections.find((c) => c.id === activeId) ?? null;
   const visibleConnections = connections.filter((c) => c.project_id === projectId);
@@ -280,6 +296,49 @@ export default function App() {
     try {
       await api.setAutocommit(activeId, next);
       updateWorkspace(activeId, { autocommit: next });
+    } catch (e) {
+      updateWorkspace(activeId, { error: String(e) });
+    }
+  }
+
+  async function handleEditCell(rowIndex: number, colIndex: number, newValue: string) {
+    if (!activeId || !ws) return;
+    const table = ws.selectedTable;
+    const rs = ws.result;
+    if (!table || !rs || !rs.columns) {
+      setStatus("需先选择表");
+      return;
+    }
+    const cols = rs.columns;
+    const row = rs.rows[rowIndex];
+    const pkCols = cols.filter((c) => c.primary_key).map((c) => c.name);
+    if (pkCols.length === 0) {
+      setStatus("该表无主键，无法编辑");
+      return;
+    }
+    const pk: [string, CellValue][] = pkCols.map((name) => {
+      const idx = cols.findIndex((c) => c.name === name);
+      return [name, row[idx]];
+    });
+    const colName = cols[colIndex].name;
+    const set: [string, CellValue][] = [[colName, toCellValue(newValue)]];
+    try {
+      const sql = await api.buildEditSql(activeId, table, pk, set);
+      setPendingEdit({ sql, table, database: ws.selectedDb || null, pk, set });
+    } catch (e) {
+      updateWorkspace(activeId, { error: String(e) });
+    }
+  }
+
+  async function confirmEdit() {
+    if (!activeId || !pendingEdit) return;
+    const { table, database, pk, set } = pendingEdit;
+    setPendingEdit(null);
+    try {
+      await api.executeEdit(activeId, database, table, pk, set);
+      setStatus("已更新");
+      const sql = workspaces[activeId]?.query;
+      if (sql) runQuery(activeId, sql);
     } catch (e) {
       updateWorkspace(activeId, { error: String(e) });
     }
@@ -538,7 +597,7 @@ export default function App() {
                 {ws.error ? (
                   <div className="error-box">{ws.error}</div>
                 ) : ws.result ? (
-                  <ResultsGrid result={ws.result} />
+                  <ResultsGrid result={ws.result} onEditCell={handleEditCell} />
                 ) : (
                   <div className="empty-state">选择一个表或输入 SQL 后点击「运行」</div>
                 )}
@@ -587,6 +646,31 @@ export default function App() {
           sql={ws?.query ?? ""}
           onClose={() => setShowExport(false)}
         />
+      )}
+
+      {pendingEdit && (
+        <div className="modal-backdrop" onClick={() => setPendingEdit(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>确认数据修改</h2>
+              <button className="icon-btn" onClick={() => setPendingEdit(null)}>
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="danger-hint">将执行以下 SQL：</p>
+              <pre className="danger-sql">{pendingEdit.sql}</pre>
+            </div>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setPendingEdit(null)}>
+                取消
+              </button>
+              <button className="btn primary" onClick={confirmEdit}>
+                确认执行
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {pendingDanger && (

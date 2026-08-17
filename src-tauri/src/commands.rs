@@ -552,6 +552,88 @@ pub async fn set_autocommit(state: State<'_, Arc<AppState>>, id: u64, enabled: b
     active.conn.set_autocommit(enabled).await
 }
 
+// ---------- 数据编辑 ----------
+
+#[tauri::command]
+pub async fn build_edit_sql(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    table: String,
+    pk: Vec<(String, dby_core::value::Value)>,
+    set: Vec<(String, dby_core::value::Value)>,
+) -> Result<String> {
+    let driver_id = {
+        let guard = state.connections.lock().await;
+        guard
+            .get(&id)
+            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?
+            .driver_id
+            .clone()
+    };
+    let driver = state.registry.resolve(&driver_id)?;
+    Ok(dby_core::edit::build_update(driver.dialect(), &table, &pk, &set))
+}
+
+#[tauri::command]
+pub async fn execute_edit(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: Option<String>,
+    table: String,
+    pk: Vec<(String, dby_core::value::Value)>,
+    set: Vec<(String, dby_core::value::Value)>,
+) -> Result<QueryOutput> {
+    let driver_id = {
+        let guard = state.connections.lock().await;
+        guard
+            .get(&id)
+            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?
+            .driver_id
+            .clone()
+    };
+    let driver = state.registry.resolve(&driver_id)?;
+    let sql = dby_core::edit::build_update(driver.dialect(), &table, &pk, &set);
+
+    let started = Utc::now();
+    let (project_id, conn_name, result) = {
+        let mut guard = state.connections.lock().await;
+        let active = guard
+            .get_mut(&id)
+            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+        let project_id = active.project_id.clone();
+        let conn_name = active.name.clone();
+        let result = execute_buffered(
+            active.conn.as_mut(),
+            database.as_deref(),
+            &sql,
+            &ExecOpts::default(),
+        )
+        .await;
+        (project_id, conn_name, result)
+    };
+
+    let duration_ms = (Utc::now() - started).num_milliseconds().max(0) as u64;
+    let mut rec = ExecutionRecord::new(project_id, sql, SqlOrigin::DataEdit);
+    rec.connection_id = Some(id.to_string());
+    rec.connection_name = Some(conn_name);
+    rec.database = database.clone();
+    rec.duration_ms = duration_ms;
+    match result {
+        Ok(output) => {
+            rec.status = "ok".to_string();
+            rec.rows_affected = output.affected_rows;
+            rec.row_count = output.first_result_set().map(|rs| rs.rows.len() as u64);
+            let _ = state.history.record(&rec);
+            Ok(output)
+        }
+        Err(e) => {
+            rec.status = e.to_string();
+            let _ = state.history.record(&rec);
+            Err(e)
+        }
+    }
+}
+
 // ---------- 导出 ----------
 
 #[tauri::command]

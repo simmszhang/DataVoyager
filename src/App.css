@@ -433,6 +433,17 @@ body {
   background: var(--hover);
 }
 
+.cell-input {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
 .th-name {
   display: block;
   font-weight: 600;

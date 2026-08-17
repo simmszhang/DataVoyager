@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { CellValue, StreamResult, displayCell } from "../api";
 
@@ -8,6 +8,7 @@ const ROWNUM_WIDTH = 56;
 
 interface Props {
   result: StreamResult;
+  onEditCell?: (rowIndex: number, colIndex: number, newValue: string) => void;
 }
 
 function Cell({ value }: { value: CellValue }) {
@@ -25,8 +26,9 @@ function Cell({ value }: { value: CellValue }) {
   }
 }
 
-export default function ResultsGrid({ result }: Props) {
+export default function ResultsGrid({ result, onEditCell }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const [editing, setEditing] = useState<{ row: number; col: number; text: string } | null>(null);
   const rows = result.columns ? result.rows : [];
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -34,6 +36,11 @@ export default function ResultsGrid({ result }: Props) {
     estimateSize: () => ROW_HEIGHT,
     overscan: 12,
   });
+
+  function commitEdit() {
+    if (editing && onEditCell) onEditCell(editing.row, editing.col, editing.text);
+    setEditing(null);
+  }
 
   if (!result.columns) {
     return (
@@ -53,6 +60,7 @@ export default function ResultsGrid({ result }: Props) {
     <div className="results">
       <div className="result-meta">
         返回 {rows.length} 行{result.truncated ? "（已截断，仅显示前 2000 行）" : ""}
+        {onEditCell && " · 双击单元格编辑"}
       </div>
       <div className="grid-wrap" ref={parentRef}>
         <div style={{ minWidth: "100%", width: "max-content" }}>
@@ -93,11 +101,40 @@ export default function ResultsGrid({ result }: Props) {
                   }}
                 >
                   <div className="grid-cell rownum">{vi.index + 1}</div>
-                  {row.map((cell, j) => (
-                    <div className="grid-cell" key={j}>
-                      <Cell value={cell} />
-                    </div>
-                  ))}
+                  {row.map((cell, j) => {
+                    const isEditing = editing?.row === vi.index && editing?.col === j;
+                    return (
+                      <div
+                        className="grid-cell"
+                        key={j}
+                        onDoubleClick={() =>
+                          onEditCell &&
+                          setEditing({
+                            row: vi.index,
+                            col: j,
+                            text: cell.t === "null" ? "" : displayCell(cell),
+                          })
+                        }
+                      >
+                        {isEditing ? (
+                          <input
+                            className="cell-input"
+                            autoFocus
+                            value={editing!.text}
+                            placeholder="NULL"
+                            onChange={(e) => setEditing({ ...editing!, text: e.target.value })}
+                            onBlur={commitEdit}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") commitEdit();
+                              else if (e.key === "Escape") setEditing(null);
+                            }}
+                          />
+                        ) : (
+                          <Cell value={cell} />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}

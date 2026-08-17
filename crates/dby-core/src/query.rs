@@ -19,7 +19,7 @@ pub struct ExecOpts {
 }
 
 /// SQL 来源，用于历史记录归因。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SqlOrigin {
     ManualEditor,
@@ -29,13 +29,8 @@ pub enum SqlOrigin {
     Ai,
     Plugin,
     Cli,
+    #[default]
     Other,
-}
-
-impl Default for SqlOrigin {
-    fn default() -> Self {
-        SqlOrigin::Other
-    }
 }
 
 impl SqlOrigin {
@@ -52,7 +47,7 @@ impl SqlOrigin {
         }
     }
 
-    pub fn from_str(s: &str) -> SqlOrigin {
+    pub fn parse(s: &str) -> SqlOrigin {
         match s {
             "manual_editor" => SqlOrigin::ManualEditor,
             "data_edit" => SqlOrigin::DataEdit,

@@ -322,7 +322,7 @@ impl HistoryStore {
                 connection_name: r.get(3)?,
                 database: r.get(4)?,
                 sql: r.get(5)?,
-                origin: SqlOrigin::from_str(&r.get::<_, String>(6)?),
+                origin: SqlOrigin::parse(&r.get::<_, String>(6)?),
                 status: r.get(7)?,
                 rows_affected: r.get::<_, i64>(8)? as u64,
                 row_count: r.get::<_, Option<i64>>(9)?.map(|v| v as u64),

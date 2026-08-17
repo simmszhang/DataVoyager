@@ -16,6 +16,8 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
     user: "root",
     password: "",
     database: "",
+    ssl: false,
+    verifyCert: true,
   });
   const [busy, setBusy] = useState<null | "test" | "connect">(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -27,10 +29,15 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
     user: form.user.trim(),
     password: form.password,
     database: form.database.trim() || null,
+    ssl: form.ssl ? { enabled: true, verify_cert: form.verifyCert } : null,
   });
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const setBool =
+    (key: "ssl" | "verifyCert") => (e: React.ChangeEvent<HTMLInputElement>) =>
+      setForm((f) => ({ ...f, [key]: e.target.checked }));
 
   async function handleTest() {
     setBusy("test");
@@ -99,6 +106,18 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
               <span>数据库（可选）</span>
               <input value={form.database} onChange={set("database")} placeholder="默认数据库" />
             </label>
+            <div className="span-2 checkbox-row">
+              <label className="checkbox">
+                <input type="checkbox" checked={form.ssl} onChange={setBool("ssl")} />
+                <span>使用 SSL/TLS</span>
+              </label>
+              {form.ssl && (
+                <label className="checkbox">
+                  <input type="checkbox" checked={form.verifyCert} onChange={setBool("verifyCert")} />
+                  <span>校验证书</span>
+                </label>
+              )}
+            </div>
           </div>
 
           {message && (

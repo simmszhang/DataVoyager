@@ -14,7 +14,7 @@ use dby_core::query::{ExecOpts, ResultSink, StreamEvent};
 use dby_core::value::Value;
 
 use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, OptsBuilder, Row};
+use mysql_async::{Conn, OptsBuilder, Row, SslOpts};
 
 pub use dialect::MysqlDialect;
 
@@ -54,12 +54,23 @@ impl Driver for MysqlDriver {
     }
 
     async fn connect(&self, params: &ConnectParams) -> Result<Box<dyn Connection + Send>> {
-        let opts = OptsBuilder::default()
+        let mut opts = OptsBuilder::default()
             .ip_or_hostname(params.host.clone())
             .tcp_port(params.port)
             .user(Some(params.user.clone()))
             .pass(params.password.clone())
             .db_name(params.database.clone());
+        if let Some(ssl) = &params.ssl {
+            if ssl.enabled {
+                // M1：verify_cert=false 接受自签名（内网常见）；ca_path/客户端证书 M2
+                let ssl_opts = if ssl.verify_cert {
+                    SslOpts::default()
+                } else {
+                    SslOpts::default().with_danger_accept_invalid_certs(true)
+                };
+                opts = opts.ssl_opts(Some(ssl_opts));
+            }
+        }
         let conn = Conn::new(opts).await.map_err(db_err)?;
         let (major, minor, patch) = conn.server_version();
         Ok(Box::new(MysqlConnection {

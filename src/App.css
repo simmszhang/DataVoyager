@@ -752,6 +752,21 @@ body {
   grid-column: span 2;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
 .form-grid label span {
   color: var(--muted);
   font-size: 12px;

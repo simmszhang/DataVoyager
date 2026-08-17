@@ -72,6 +72,7 @@ export interface ConnectParams {
   user: string;
   password?: string | null;
   database?: string | null;
+  ssl?: { enabled: boolean; verify_cert?: boolean } | null;
 }
 
 // ---------- 元数据 ----------

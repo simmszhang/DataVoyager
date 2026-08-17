@@ -4,9 +4,12 @@
 //! 未来的 CLI / MCP / Web 复用。
 
 pub mod config;
+pub mod danger;
 pub mod dialect;
 pub mod driver;
+pub mod edit;
 pub mod error;
+pub mod export;
 pub mod history;
 pub mod metadata;
 pub mod project;

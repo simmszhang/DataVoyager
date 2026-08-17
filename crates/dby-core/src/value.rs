@@ -87,6 +87,38 @@ impl Value {
             ),
         }
     }
+
+    /// 转为普通 JSON 值（用于导出 JSON；与带 tag 的 IPC envelope 不同）。
+    pub fn to_json_value(&self) -> serde_json::Value {
+        match self {
+            Value::Null => serde_json::Value::Null,
+            Value::Bool(b) => serde_json::Value::Bool(*b),
+            Value::I64(i) => serde_json::Value::from(*i),
+            Value::U64(u) => serde_json::Value::from(*u),
+            Value::F64(f) => serde_json::Number::from_f64(*f)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+            Value::Decimal(s)
+            | Value::Str(s)
+            | Value::Date(s)
+            | Value::Time(s)
+            | Value::DateTime(s)
+            | Value::Uuid(s) => serde_json::Value::String(s.clone()),
+            Value::Bytes(b) => serde_json::Value::String(format!(
+                "0x{}",
+                b.iter().map(|x| format!("{x:02x}")).collect::<String>()
+            )),
+            Value::Json(j) => j.clone(),
+            Value::Array(a) => {
+                serde_json::Value::Array(a.iter().map(|v| v.to_json_value()).collect())
+            }
+            Value::Map(m) => serde_json::Value::Object(
+                m.iter()
+                    .map(|(k, v)| (k.clone(), v.to_json_value()))
+                    .collect(),
+            ),
+        }
+    }
 }
 
 #[cfg(test)]

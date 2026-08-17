@@ -1,0 +1,16 @@
+[package]
+name = "dby-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Pure-Rust database engine for dby: driver abstraction, value model, project/config, SQL history"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+rusqlite.workspace = true

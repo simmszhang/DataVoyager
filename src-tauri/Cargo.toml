@@ -1,0 +1,23 @@
+[package]
+name = "dby"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "A lightweight, extensible, cross-platform database client"
+
+[lib]
+# Desktop-only build: drop `cdylib` (mobile-only) — on the GNU Windows toolchain
+# the cdylib export table can exceed the mingw linker's ordinal limit.
+name = "dby_lib"
+crate-type = ["staticlib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde.workspace = true
+chrono.workspace = true
+dby-core = { path = "../crates/dby-core" }
+dby-driver-mysql = { path = "../crates/dby-driver-mysql" }

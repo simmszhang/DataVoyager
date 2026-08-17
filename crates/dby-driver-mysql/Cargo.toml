@@ -1,0 +1,12 @@
+[package]
+name = "dby-driver-mysql"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "MySQL driver for dby"
+
+[dependencies]
+dby-core = { path = "../dby-core" }
+# 纯 Rust flate2（minimal-rust）避免 C 工具链/zlib 依赖
+mysql = { version = "28", default-features = false, features = ["minimal-rust"] }

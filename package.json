@@ -15,7 +15,8 @@
     "@tauri-apps/api": "^2",
     "@uiw/react-codemirror": "^4",
     "@codemirror/lang-sql": "^6",
-    "@codemirror/theme-one-dark": "^6"
+    "@codemirror/theme-one-dark": "^6",
+    "@tanstack/react-virtual": "^3"
   },
   "devDependencies": {
     "@types/react": "^19.1.8",

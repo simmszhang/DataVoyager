@@ -358,36 +358,39 @@ body {
   min-height: 0;
 }
 
-.grid {
-  border-collapse: collapse;
-  font-family: var(--mono);
-  font-size: 12px;
-  width: max-content;
-  min-width: 100%;
+.grid-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
 }
 
-.grid th,
-.grid td {
+.grid-cell {
   padding: 5px 10px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  text-align: left;
+  font-family: var(--mono);
+  font-size: 12px;
   white-space: nowrap;
-  max-width: 480px;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
-.grid thead th {
-  position: sticky;
-  top: 0;
-  background: var(--panel-2);
-  z-index: 1;
-  font-weight: 600;
+.grid-cell.rownum {
+  color: var(--muted);
+  text-align: right;
+  background: var(--panel);
+}
+
+.grid-row:hover .grid-cell {
+  background: var(--hover);
 }
 
 .th-name {
   display: block;
+  font-weight: 600;
 }
 
 .th-type {
@@ -395,18 +398,6 @@ body {
   color: var(--muted);
   font-weight: 400;
   font-size: 10px;
-}
-
-.grid tbody tr:hover {
-  background: var(--hover);
-}
-
-.grid .rownum {
-  position: sticky;
-  left: 0;
-  background: var(--panel);
-  color: var(--muted);
-  text-align: right;
 }
 
 .cell-null {

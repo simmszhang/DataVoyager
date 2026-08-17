@@ -1,0 +1,26 @@
+services:
+  mysql80:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: dby-test
+      MYSQL_DATABASE: dby_test
+    ports:
+      - "33061:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pdby-test"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  mysql57:
+    image: mysql:5.7
+    environment:
+      MYSQL_ROOT_PASSWORD: dby-test
+      MYSQL_DATABASE: dby_test
+    ports:
+      - "33062:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pdby-test"]
+      interval: 5s
+      timeout: 5s
+      retries: 12

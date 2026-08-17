@@ -153,7 +153,8 @@ async fn streaming_cancel_and_reuse() {
     let res = conn
         .execute_stream(
             None,
-            "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n < 1000000) SELECT SLEEP(0.001) FROM seq",
+            // 交叉连接产生大量行、每行 1ms 睡眠（足够慢让取消生效）
+            "SELECT SLEEP(0.001) FROM information_schema.tables a, information_schema.tables b, information_schema.tables c LIMIT 5000",
             &opts,
             &mut sink,
         )

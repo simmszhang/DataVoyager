@@ -219,6 +219,40 @@ pub async fn create_project(state: State<'_, Arc<AppState>>, name: String) -> Re
     Ok(project)
 }
 
+#[tauri::command]
+pub async fn rename_project(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    name: String,
+) -> Result<Project> {
+    let mut cfg = state.config.lock().await;
+    let project = cfg
+        .projects
+        .iter_mut()
+        .find(|p| p.id == id)
+        .ok_or_else(|| DbError::Config("project not found".to_string()))?;
+    project.name = name;
+    project.touch();
+    let result = project.clone();
+    cfg.save(&state.config_path)?;
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn delete_project(state: State<'_, Arc<AppState>>, id: String) -> Result<()> {
+    {
+        let guard = state.connections.lock().await;
+        if guard.values().any(|c| c.project_id == id) {
+            return Err(DbError::Config("项目下仍有连接，请先删除连接".to_string()));
+        }
+    }
+    let mut cfg = state.config.lock().await;
+    cfg.projects.retain(|p| p.id != id);
+    cfg.save(&state.config_path)?;
+    state.history.clear(Some(&id))?;
+    Ok(())
+}
+
 // ---------- 历史 ----------
 
 #[tauri::command]

@@ -111,6 +111,28 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.project-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.project-select {
+  width: calc(100% - 24px);
+  margin: 8px 12px 4px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 6px;
+}
+
+.conn-driver {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
 .conn-list {
   padding: 6px;
   border-bottom: 1px solid var(--border);

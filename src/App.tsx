@@ -47,6 +47,7 @@ export default function App() {
   const [, setTick] = useState(0);
 
   const activeConn = connections.find((c) => c.id === activeId) ?? null;
+  const visibleConnections = connections.filter((c) => c.project_id === projectId);
 
   useEffect(() => {
     api
@@ -275,6 +276,64 @@ export default function App() {
     }
   }
 
+  async function refreshProjects(selectId?: string) {
+    const ps = await api.listProjects();
+    setProjects(ps);
+    if (selectId !== undefined) {
+      setProjectId(selectId);
+    } else if (ps.length > 0 && !ps.some((p) => p.id === projectId)) {
+      setProjectId(ps[0].id);
+    }
+  }
+
+  async function handleCreateProject() {
+    const name = window.prompt("项目名称");
+    if (!name) return;
+    try {
+      const p = await api.createProject(name);
+      await refreshProjects(p.id);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleRenameProject() {
+    if (!projectId) return;
+    const current = projects.find((p) => p.id === projectId);
+    const name = window.prompt("新名称", current?.name);
+    if (!name) return;
+    try {
+      await api.renameProject(projectId, name);
+      await refreshProjects();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleDeleteProject() {
+    if (!projectId) return;
+    if (!window.confirm("删除该项目？项目下连接需先删除。")) return;
+    try {
+      await api.deleteProject(projectId);
+      await refreshProjects();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function handleSwitchProject(id: string) {
+    setProjectId(id);
+    setActiveId(null);
+    resetResult();
+    resetTxn();
+    setError(null);
+    setDatabases([]);
+    setSelectedDb("");
+    setTables([]);
+    setSelectedTable(null);
+    setColumns([]);
+  }
+
   // 快捷键：Ctrl/Cmd+Enter 运行（通过 ref 避免闭包过期）。
   const runRef = useRef<() => void>(() => {});
   runRef.current = handleRun;
@@ -342,23 +401,61 @@ export default function App() {
       <div className="body">
         <aside className="sidebar">
           <div className="sidebar-head">
+            <span className="section-title">项目</span>
+            <div className="project-actions">
+              <button className="btn small" onClick={handleCreateProject} title="新建项目">
+                +
+              </button>
+              <button
+                className="btn small"
+                onClick={handleRenameProject}
+                disabled={!projectId}
+                title="重命名"
+              >
+                ✎
+              </button>
+              <button
+                className="btn small"
+                onClick={handleDeleteProject}
+                disabled={!projectId || projects.length <= 1}
+                title="删除"
+              >
+                🗑
+              </button>
+            </div>
+          </div>
+          <select
+            className="project-select"
+            value={projectId ?? ""}
+            onChange={(e) => handleSwitchProject(e.target.value)}
+          >
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+
+          <div className="sidebar-head">
             <span className="section-title">连接</span>
             <button className="btn small" onClick={() => setShowDialog(true)}>
               +
             </button>
           </div>
           <div className="conn-list">
-            {connections.map((c) => (
+            {visibleConnections.map((c) => (
               <div
                 key={c.id}
                 className={`list-item conn ${activeId === c.id ? "active" : ""}`}
                 onClick={() => handleSelectConnection(c.id)}
+                title={c.server_version}
               >
                 <span className="conn-dot" />
                 <span className="ellipsis">{c.name}</span>
+                <span className="conn-driver">{c.driver_id}</span>
               </div>
             ))}
-            {connections.length === 0 && <div className="empty">暂无连接</div>}
+            {visibleConnections.length === 0 && <div className="empty">暂无连接</div>}
           </div>
 
           {activeConn && (

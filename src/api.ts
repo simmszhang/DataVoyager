@@ -215,6 +215,9 @@ export const api = {
 
   listProjects: () => invoke<Project[]>("list_projects"),
   createProject: (name: string) => invoke<Project>("create_project", { name }),
+  renameProject: (id: string, name: string) =>
+    invoke<Project>("rename_project", { id, name }),
+  deleteProject: (id: string) => invoke<void>("delete_project", { id }),
 
   searchHistory: (query: string, projectId?: string | null) =>
     invoke<StatementHit[]>("search_history", { query, projectId }),

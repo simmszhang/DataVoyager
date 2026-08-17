@@ -1,15 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import {
-  api,
-  ColumnInfo,
-  ConnectionSummary,
-  DriverInfo,
-  Project,
-  StreamEvent,
-  StreamResult,
-  TableInfo,
-} from "./api";
+import { api, DriverInfo, StreamEvent } from "./api";
+import { useStore } from "./store";
 import ConnectionDialog from "./components/ConnectionDialog";
 import SchemaPanel from "./components/SchemaPanel";
 import QueryEditor from "./components/QueryEditor";
@@ -19,66 +11,55 @@ import HistoryPanel from "./components/HistoryPanel";
 import "./App.css";
 
 export default function App() {
+  const {
+    projects,
+    projectId,
+    connections,
+    activeId,
+    tabs,
+    workspaces,
+    setProjects,
+    setProjectId,
+    setConnections,
+    openConnection,
+    closeConnection,
+    setActive,
+    updateWorkspace,
+    mutateResult,
+  } = useStore();
+
   const [drivers, setDrivers] = useState<DriverInfo[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [connections, setConnections] = useState<ConnectionSummary[]>([]);
-  const [activeId, setActiveId] = useState<number | null>(null);
   const [showDialog, setShowDialog] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-
-  const [databases, setDatabases] = useState<string[]>([]);
-  const [selectedDb, setSelectedDb] = useState("");
-  const [tables, setTables] = useState<TableInfo[]>([]);
-  const [selectedTable, setSelectedTable] = useState<string | null>(null);
-  const [columns, setColumns] = useState<ColumnInfo[]>([]);
-  const [schemaLoading, setSchemaLoading] = useState(false);
-
-  const [query, setQuery] = useState("SELECT 1");
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
   const [pendingDanger, setPendingDanger] = useState<{
     sql: string;
     reasons: string[];
   } | null>(null);
-  const [inTransaction, setInTransaction] = useState(false);
-  const [autocommit, setAutocommit] = useState(true);
-
-  // 流式结果：ref 持有可变缓冲，tick 触发渲染（O(1) 追加）。
-  const resultRef = useRef<StreamResult | null>(null);
-  const [, setTick] = useState(0);
+  const [status, setStatus] = useState<string | null>(null);
 
   const activeConn = connections.find((c) => c.id === activeId) ?? null;
   const visibleConnections = connections.filter((c) => c.project_id === projectId);
+  const ws = activeId != null ? workspaces[activeId] : undefined;
 
   useEffect(() => {
-    api
-      .listDrivers()
-      .then(setDrivers)
-      .catch((e) => setError(String(e)));
+    api.listDrivers().then(setDrivers).catch(() => {});
     api
       .listProjects()
       .then((ps) => {
         setProjects(ps);
         if (ps.length > 0) setProjectId(ps[0].id);
       })
-      .catch((e) => setError(String(e)));
+      .catch(() => {});
   }, []);
 
-  const loadDatabases = useCallback(async (id: number) => {
+  async function loadDatabases(id: number) {
     try {
       const dbs = await api.listDatabases(id);
-      setDatabases(dbs);
+      updateWorkspace(id, { databases: dbs });
     } catch (e) {
-      setError(String(e));
+      updateWorkspace(id, { error: String(e) });
     }
-  }, []);
-
-  function resetResult() {
-    resultRef.current = null;
-    setTick((t) => t + 1);
   }
 
   async function handleConnected() {
@@ -87,139 +68,132 @@ export default function App() {
       const list = await api.listConnections();
       setConnections(list);
       const newest = list[list.length - 1];
-      setActiveId(newest.id);
+      openConnection(newest);
       setStatus(`已连接 ${newest.name}（${newest.server_version}）`);
-      setSelectedTable(null);
-      setColumns([]);
-      resetResult();
-      setError(null);
       await loadDatabases(newest.id);
       const db = newest.database;
-      setSelectedDb(db);
       if (db) {
-        setTables(await api.listTables(newest.id, db));
-      } else {
-        setTables([]);
+        updateWorkspace(newest.id, { selectedDb: db });
+        try {
+          const tbls = await api.listTables(newest.id, db);
+          updateWorkspace(newest.id, { tables: tbls });
+        } catch (e) {
+          updateWorkspace(newest.id, { error: String(e) });
+        }
       }
     } catch (e) {
-      setError(String(e));
+      setStatus(String(e));
     }
   }
 
   async function handleSelectConnection(id: number) {
-    setActiveId(id);
-    resetResult();
-    resetTxn();
-    setError(null);
-    setSelectedTable(null);
-    setColumns([]);
     const conn = connections.find((c) => c.id === id);
+    openConnection(conn!);
+    if (workspaces[id]) return; // 已打开过，直接切
     await loadDatabases(id);
     const db = conn?.database ?? "";
-    setSelectedDb(db);
     if (db) {
+      updateWorkspace(id, { selectedDb: db });
       try {
-        setTables(await api.listTables(id, db));
+        const tbls = await api.listTables(id, db);
+        updateWorkspace(id, { tables: tbls });
       } catch (e) {
-        setError(String(e));
+        updateWorkspace(id, { error: String(e) });
       }
-    } else {
-      setTables([]);
     }
   }
 
   async function handleSelectDb(db: string) {
-    setSelectedDb(db);
-    setSelectedTable(null);
-    setColumns([]);
     if (!activeId) return;
+    updateWorkspace(activeId, { selectedDb: db, selectedTable: null, columns: [] });
     if (!db) {
-      setTables([]);
+      updateWorkspace(activeId, { tables: [] });
       return;
     }
-    setSchemaLoading(true);
     try {
-      setTables(await api.listTables(activeId, db));
+      const tbls = await api.listTables(activeId, db);
+      updateWorkspace(activeId, { tables: tbls });
     } catch (e) {
-      setError(String(e));
-    } finally {
-      setSchemaLoading(false);
+      updateWorkspace(activeId, { error: String(e) });
     }
   }
 
   async function handleSelectTable(table: string) {
-    setSelectedTable(table);
-    if (!activeId || !selectedDb) return;
+    if (!activeId) return;
+    updateWorkspace(activeId, { selectedTable: table });
+    const db = workspaces[activeId]?.selectedDb ?? "";
+    if (!db) return;
     try {
-      const cols = await api.listColumns(activeId, selectedDb, table);
-      setColumns(cols);
-      setQuery(`SELECT * FROM \`${table}\` LIMIT 100;`);
+      const cols = await api.listColumns(activeId, db, table);
+      updateWorkspace(activeId, {
+        columns: cols,
+        query: `SELECT * FROM \`${table}\` LIMIT 100;`,
+      });
     } catch (e) {
-      setError(String(e));
+      updateWorkspace(activeId, { error: String(e) });
     }
   }
 
-  async function runQuery(sql: string) {
-    if (!activeId) return;
-    setRunning(true);
-    setError(null);
-    resultRef.current = {
-      columns: null,
-      rows: [],
-      affected_rows: 0,
-      last_insert_id: null,
-      truncated: false,
-    };
-    setTick((t) => t + 1);
-
+  async function runQuery(id: number, sql: string) {
+    const db = workspaces[id]?.selectedDb ?? "";
+    updateWorkspace(id, {
+      running: true,
+      error: null,
+      result: {
+        columns: null,
+        rows: [],
+        affected_rows: 0,
+        last_insert_id: null,
+        truncated: false,
+      },
+    });
     const channel = new Channel<StreamEvent>();
     channel.onmessage = (ev) => {
-      const r = resultRef.current;
-      if (!r) return;
       switch (ev.event) {
         case "columns":
-          r.columns = ev.data;
+          mutateResult(id, (r) => {
+            r.columns = ev.data;
+          });
           break;
         case "rows":
-          r.rows.push(...ev.data);
+          mutateResult(id, (r) => {
+            r.rows.push(...ev.data);
+          });
           break;
         case "affected":
-          r.affected_rows = ev.data.affected_rows;
-          r.last_insert_id = ev.data.last_insert_id;
+          mutateResult(id, (r) => {
+            r.affected_rows = ev.data.affected_rows;
+            r.last_insert_id = ev.data.last_insert_id;
+          });
           break;
         case "info":
           break;
       }
-      setTick((t) => t + 1);
     };
-
     try {
-      await api.executeQueryStream(channel, activeId, selectedDb || null, sql);
-      const r = resultRef.current;
-      setStatus(
-        r && r.columns
-          ? `返回 ${r.rows.length} 行`
-          : `影响 ${r?.affected_rows ?? 0} 行`,
-      );
+      await api.executeQueryStream(channel, id, db || null, sql);
+      const r = workspaces[id]?.result;
+      setStatus(r && r.columns ? `返回 ${r.rows.length} 行` : `影响 ${r?.affected_rows ?? 0} 行`);
     } catch (e) {
-      setError(String(e));
+      updateWorkspace(id, { error: String(e) });
       setStatus("查询失败");
     } finally {
-      setRunning(false);
+      updateWorkspace(id, { running: false });
     }
   }
 
   async function handleRun() {
     if (!activeId) return;
+    const sql = workspaces[activeId]?.query ?? "SELECT 1";
     try {
-      const danger = await api.analyzeDanger(query);
+      const danger = await api.analyzeDanger(sql);
       if (danger.level === "dangerous") {
-        setPendingDanger({ sql: query, reasons: danger.reasons });
+        setPendingDanger({ sql, reasons: danger.reasons });
         return;
       }
-      await runQuery(query);
+      await runQuery(activeId, sql);
     } catch (e) {
-      setError(String(e));
+      updateWorkspace(activeId, { error: String(e) });
     }
   }
 
@@ -228,22 +202,17 @@ export default function App() {
     try {
       await api.cancelQuery(activeId);
     } catch (e) {
-      setError(String(e));
+      updateWorkspace(activeId, { error: String(e) });
     }
-  }
-
-  function resetTxn() {
-    setInTransaction(false);
-    setAutocommit(true);
   }
 
   async function handleBegin() {
     if (!activeId) return;
     try {
       await api.begin(activeId);
-      setInTransaction(true);
+      updateWorkspace(activeId, { inTransaction: true });
     } catch (e) {
-      setError(String(e));
+      updateWorkspace(activeId, { error: String(e) });
     }
   }
 
@@ -251,10 +220,10 @@ export default function App() {
     if (!activeId) return;
     try {
       await api.commit(activeId);
-      setInTransaction(false);
+      updateWorkspace(activeId, { inTransaction: false });
       setStatus("已提交");
     } catch (e) {
-      setError(String(e));
+      updateWorkspace(activeId, { error: String(e) });
     }
   }
 
@@ -262,21 +231,21 @@ export default function App() {
     if (!activeId) return;
     try {
       await api.rollback(activeId);
-      setInTransaction(false);
+      updateWorkspace(activeId, { inTransaction: false });
       setStatus("已回滚");
     } catch (e) {
-      setError(String(e));
+      updateWorkspace(activeId, { error: String(e) });
     }
   }
 
   async function handleToggleAutocommit() {
     if (!activeId) return;
-    const next = !autocommit;
+    const next = !(workspaces[activeId]?.autocommit ?? true);
     try {
       await api.setAutocommit(activeId, next);
-      setAutocommit(next);
+      updateWorkspace(activeId, { autocommit: next });
     } catch (e) {
-      setError(String(e));
+      updateWorkspace(activeId, { error: String(e) });
     }
   }
 
@@ -297,7 +266,7 @@ export default function App() {
       const p = await api.createProject(name);
       await refreshProjects(p.id);
     } catch (e) {
-      setError(String(e));
+      setStatus(String(e));
     }
   }
 
@@ -310,7 +279,7 @@ export default function App() {
       await api.renameProject(projectId, name);
       await refreshProjects();
     } catch (e) {
-      setError(String(e));
+      setStatus(String(e));
     }
   }
 
@@ -321,24 +290,27 @@ export default function App() {
       await api.deleteProject(projectId);
       await refreshProjects();
     } catch (e) {
-      setError(String(e));
+      setStatus(String(e));
     }
   }
 
   function handleSwitchProject(id: string) {
     setProjectId(id);
-    setActiveId(null);
-    resetResult();
-    resetTxn();
-    setError(null);
-    setDatabases([]);
-    setSelectedDb("");
-    setTables([]);
-    setSelectedTable(null);
-    setColumns([]);
+    setActive(null);
   }
 
-  // 快捷键：Ctrl/Cmd+Enter 运行（通过 ref 避免闭包过期）。
+  async function handleDisconnect(id: number) {
+    try {
+      await api.disconnect(id);
+      setConnections(connections.filter((c) => c.id !== id));
+      closeConnection(id);
+      setStatus(null);
+    } catch (e) {
+      setStatus(String(e));
+    }
+  }
+
+  // 快捷键 Ctrl/Cmd+Enter 运行（ref 避免闭包过期）。
   const runRef = useRef<() => void>(() => {});
   runRef.current = handleRun;
   useEffect(() => {
@@ -351,29 +323,6 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-
-  async function handleDisconnect(id: number) {
-    try {
-      await api.disconnect(id);
-      setConnections((list) => list.filter((c) => c.id !== id));
-      if (activeId === id) {
-        setActiveId(null);
-        setDatabases([]);
-        setSelectedDb("");
-        setTables([]);
-        setSelectedTable(null);
-        setColumns([]);
-        resetResult();
-        resetTxn();
-        setStatus(null);
-        setError(null);
-      }
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  const result = resultRef.current;
 
   return (
     <div className="app">
@@ -401,6 +350,32 @@ export default function App() {
           )}
         </div>
       </header>
+
+      <div className="conn-tabs">
+        {tabs.map((id) => {
+          const c = connections.find((x) => x.id === id);
+          if (!c) return null;
+          return (
+            <div
+              key={id}
+              className={`conn-tab ${activeId === id ? "active" : ""}`}
+              onClick={() => setActive(id)}
+            >
+              <span className="ellipsis">{c.name}</span>
+              <span className="conn-driver">{c.driver_id}</span>
+              <button
+                className="tab-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDisconnect(id);
+                }}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+      </div>
 
       <div className="body">
         <aside className="sidebar">
@@ -462,14 +437,14 @@ export default function App() {
             {visibleConnections.length === 0 && <div className="empty">暂无连接</div>}
           </div>
 
-          {activeConn && (
+          {activeConn && ws && (
             <SchemaPanel
-              databases={databases}
-              tables={tables}
-              columns={columns}
-              selectedDb={selectedDb}
-              selectedTable={selectedTable}
-              loading={schemaLoading}
+              databases={ws.databases}
+              tables={ws.tables}
+              columns={ws.columns}
+              selectedDb={ws.selectedDb}
+              selectedTable={ws.selectedTable}
+              loading={false}
               onSelectDb={handleSelectDb}
               onSelectTable={handleSelectTable}
               onRefresh={() => loadDatabases(activeConn.id)}
@@ -478,31 +453,29 @@ export default function App() {
         </aside>
 
         <main className="main">
-          {activeConn ? (
+          {activeConn && ws ? (
             <>
               <QueryEditor
-                value={query}
-                running={running}
-                onChange={setQuery}
+                value={ws.query}
+                running={ws.running}
+                onChange={(v) => updateWorkspace(activeId!, { query: v })}
                 onRun={handleRun}
                 onCancel={handleCancel}
                 onExport={() => setShowExport(true)}
-                inTransaction={inTransaction}
-                autocommit={autocommit}
+                inTransaction={ws.inTransaction}
+                autocommit={ws.autocommit}
                 onBegin={handleBegin}
                 onCommit={handleCommit}
                 onRollback={handleRollback}
                 onToggleAutocommit={handleToggleAutocommit}
               />
               <section className="results-panel">
-                {error ? (
-                  <div className="error-box">{error}</div>
-                ) : result ? (
-                  <ResultsGrid result={result} />
+                {ws.error ? (
+                  <div className="error-box">{ws.error}</div>
+                ) : ws.result ? (
+                  <ResultsGrid result={ws.result} />
                 ) : (
-                  <div className="empty-state">
-                    选择一个表或输入 SQL 后点击「运行」
-                  </div>
+                  <div className="empty-state">选择一个表或输入 SQL 后点击「运行」</div>
                 )}
               </section>
             </>
@@ -513,7 +486,10 @@ export default function App() {
             </div>
           )}
           {showHistory && (
-            <HistoryPanel projectId={projectId} onLoadSql={(sql) => setQuery(sql)} />
+            <HistoryPanel
+              projectId={projectId}
+              onLoadSql={(sql) => activeId && updateWorkspace(activeId, { query: sql })}
+            />
           )}
         </main>
       </div>
@@ -522,7 +498,7 @@ export default function App() {
         <button className="btn small" onClick={() => setShowHistory((v) => !v)}>
           历史
         </button>
-        {inTransaction && <span className="txn-indicator">● 事务中</span>}
+        {ws?.inTransaction && <span className="txn-indicator">● 事务中</span>}
         <span className="status">{status ?? "就绪"}</span>
         <span className="spacer" />
         <span>
@@ -542,8 +518,8 @@ export default function App() {
       {showExport && activeId && (
         <ExportDialog
           connectionId={activeId}
-          database={selectedDb || null}
-          sql={query}
+          database={ws?.selectedDb || null}
+          sql={ws?.query ?? ""}
           onClose={() => setShowExport(false)}
         />
       )}
@@ -575,7 +551,7 @@ export default function App() {
                 onClick={() => {
                   const sql = pendingDanger.sql;
                   setPendingDanger(null);
-                  runQuery(sql);
+                  if (activeId) runQuery(activeId, sql);
                 }}
               >
                 确认执行

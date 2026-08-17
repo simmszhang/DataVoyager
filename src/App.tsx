@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, DriverInfo, StreamEvent } from "./api";
+import { api, DriverInfo, SavedConnection, StreamEvent } from "./api";
 import { useStore } from "./store";
 import ConnectionDialog from "./components/ConnectionDialog";
 import SchemaPanel from "./components/SchemaPanel";
@@ -37,6 +37,7 @@ export default function App() {
     reasons: string[];
   } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
 
   const activeConn = connections.find((c) => c.id === activeId) ?? null;
   const visibleConnections = connections.filter((c) => c.project_id === projectId);
@@ -51,7 +52,39 @@ export default function App() {
         if (ps.length > 0) setProjectId(ps[0].id);
       })
       .catch(() => {});
+    refreshSaved();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function refreshSaved() {
+    try {
+      setSavedConnections(await api.listSavedConnections(null));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /// 连接成功后：刷新连接列表 + 打开标签 + 加载元数据。
+  async function finishConnect() {
+    const list = await api.listConnections();
+    setConnections(list);
+    const newest = list[list.length - 1];
+    if (!newest) return;
+    openConnection(newest);
+    setStatus(`已连接 ${newest.name}（${newest.server_version}）`);
+    await loadDatabases(newest.id);
+    const db = newest.database;
+    if (db) {
+      updateWorkspace(newest.id, { selectedDb: db });
+      try {
+        const tbls = await api.listTables(newest.id, db);
+        updateWorkspace(newest.id, { tables: tbls });
+      } catch (e) {
+        updateWorkspace(newest.id, { error: String(e) });
+      }
+    }
+    await refreshSaved();
+  }
 
   async function loadDatabases(id: number) {
     try {
@@ -65,22 +98,25 @@ export default function App() {
   async function handleConnected() {
     setShowDialog(false);
     try {
-      const list = await api.listConnections();
-      setConnections(list);
-      const newest = list[list.length - 1];
-      openConnection(newest);
-      setStatus(`已连接 ${newest.name}（${newest.server_version}）`);
-      await loadDatabases(newest.id);
-      const db = newest.database;
-      if (db) {
-        updateWorkspace(newest.id, { selectedDb: db });
-        try {
-          const tbls = await api.listTables(newest.id, db);
-          updateWorkspace(newest.id, { tables: tbls });
-        } catch (e) {
-          updateWorkspace(newest.id, { error: String(e) });
-        }
-      }
+      await finishConnect();
+    } catch (e) {
+      setStatus(String(e));
+    }
+  }
+
+  async function handleReconnect(configId: string) {
+    try {
+      await api.reconnect(configId);
+      await finishConnect();
+    } catch (e) {
+      setStatus(String(e));
+    }
+  }
+
+  async function handleDeleteSaved(configId: string) {
+    try {
+      await api.deleteSavedConnection(configId);
+      await refreshSaved();
     } catch (e) {
       setStatus(String(e));
     }
@@ -435,6 +471,35 @@ export default function App() {
               </div>
             ))}
             {visibleConnections.length === 0 && <div className="empty">暂无连接</div>}
+          </div>
+
+          <div className="sidebar-head">
+            <span className="section-title">已保存</span>
+          </div>
+          <div className="conn-list">
+            {savedConnections
+              .filter((c) => c.project_id === projectId)
+              .map((c) => (
+                <div key={c.id} className="list-item conn">
+                  <span className="conn-dot" />
+                  <span className="ellipsis" title={`${c.user}@${c.host}:${c.port}`}>
+                    {c.name}
+                  </span>
+                  <button className="icon-btn" title="连接" onClick={() => handleReconnect(c.id)}>
+                    ↻
+                  </button>
+                  <button
+                    className="icon-btn"
+                    title="删除"
+                    onClick={() => handleDeleteSaved(c.id)}
+                  >
+                    🗑
+                  </button>
+                </div>
+              ))}
+            {savedConnections.filter((c) => c.project_id === projectId).length === 0 && (
+              <div className="empty">无已保存连接</div>
+            )}
           </div>
 
           {activeConn && ws && (

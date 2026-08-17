@@ -5,6 +5,7 @@ use serde::Serialize;
 use tauri::State;
 
 use dby_core::danger::DangerLevel;
+use dby_core::config::ConnectionConfig;
 use dby_core::driver::{execute_buffered, ConnectParams, DriverInfo};
 use dby_core::error::{DbError, Result};
 use dby_core::history::{ExecutionRecord, HistoryFilter, StatementHit};
@@ -67,22 +68,49 @@ pub async fn connect(
     params: ConnectParams,
     project_id: Option<String>,
 ) -> Result<ConnectResponse> {
+    let project_id = state.resolve_project_id(project_id).await;
+    let name = auto_name(&params);
+    let resp = open_session(state.inner(), &params, project_id.clone(), name.clone()).await?;
+
+    // 持久化连接配置 + 密码进钥匙串
+    let config_id = uuid::Uuid::new_v4().to_string();
+    let config = ConnectionConfig {
+        id: config_id.clone(),
+        project_id: project_id.clone(),
+        name,
+        driver: params.driver.clone(),
+        host: params.host.clone(),
+        port: params.port,
+        user: params.user.clone(),
+        database: params.database.clone(),
+        ssl: params.ssl.clone(),
+        ssh: params.ssh.clone(),
+        color: None,
+    };
+    {
+        let mut cfg = state.config.lock().await;
+        cfg.connections.push(config);
+        cfg.save(&state.config_path)?;
+    }
+    if let Some(pw) = &params.password {
+        if !pw.is_empty() {
+            let _ = set_secret(&config_id, pw); // 钥匙串失败不阻断连接
+        }
+    }
+    Ok(resp)
+}
+
+/// 打开会话（连接 + 建 ActiveConnection），返回响应。
+async fn open_session(
+    state: &Arc<AppState>,
+    params: &ConnectParams,
+    project_id: String,
+    name: String,
+) -> Result<ConnectResponse> {
     let driver = state.registry.resolve(&params.driver)?;
-    let conn = driver.connect(&params).await?;
+    let conn = driver.connect(params).await?;
     let server_version = conn.server_version();
     let database = params.database.clone().unwrap_or_default();
-    let project_id = state.resolve_project_id(project_id).await;
-    let name = format!(
-        "{}@{}:{}{}",
-        params.user,
-        params.host,
-        params.port,
-        if database.is_empty() {
-            String::new()
-        } else {
-            format!("/{database}")
-        }
-    );
     let id = state.alloc_id();
     let active = ActiveConnection {
         id,
@@ -103,6 +131,105 @@ pub async fn connect(
         database,
         server_version,
     })
+}
+
+fn auto_name(params: &ConnectParams) -> String {
+    let database = params.database.clone().unwrap_or_default();
+    format!(
+        "{}@{}:{}{}",
+        params.user,
+        params.host,
+        params.port,
+        if database.is_empty() {
+            String::new()
+        } else {
+            format!("/{database}")
+        }
+    )
+}
+
+fn set_secret(key: &str, value: &str) -> Result<()> {
+    keyring::Entry::new("dby", key)
+        .map_err(|e| DbError::Other(format!("keychain error: {e}")))?
+        .set_password(value)
+        .map_err(|e| DbError::Other(format!("keychain error: {e}")))
+}
+
+fn get_secret(key: &str) -> Result<String> {
+    keyring::Entry::new("dby", key)
+        .map_err(|e| DbError::Other(format!("keychain error: {e}")))?
+        .get_password()
+        .map_err(|e| DbError::Other(format!("keychain error: {e}")))
+}
+
+fn delete_secret(key: &str) -> Result<()> {
+    keyring::Entry::new("dby", key)
+        .map_err(|e| DbError::Other(format!("keychain error: {e}")))?
+        .delete_credential()
+        .map_err(|e| DbError::Other(format!("keychain error: {e}")))
+}
+
+#[tauri::command]
+pub async fn list_saved_connections(
+    state: State<'_, Arc<AppState>>,
+    project_id: Option<String>,
+) -> Result<Vec<ConnectionConfig>> {
+    let cfg = state.config.lock().await;
+    Ok(cfg
+        .connections
+        .iter()
+        .filter(|c| project_id.as_deref().map(|p| c.project_id == p).unwrap_or(true))
+        .cloned()
+        .collect())
+}
+
+#[tauri::command]
+pub async fn reconnect(
+    state: State<'_, Arc<AppState>>,
+    config_id: String,
+) -> Result<ConnectResponse> {
+    let config = {
+        let cfg = state.config.lock().await;
+        cfg.connections
+            .iter()
+            .find(|c| c.id == config_id)
+            .cloned()
+    }
+    .ok_or_else(|| DbError::Config("连接配置不存在".to_string()))?;
+
+    let password = get_secret(&config_id).ok();
+    let params = ConnectParams {
+        driver: config.driver.clone(),
+        host: config.host.clone(),
+        port: config.port,
+        user: config.user.clone(),
+        password,
+        database: config.database.clone(),
+        ssl: config.ssl.clone(),
+        ssh: config.ssh.clone(),
+        params: std::collections::HashMap::new(),
+    };
+    open_session(
+        state.inner(),
+        &params,
+        config.project_id.clone(),
+        config.name.clone(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn delete_saved_connection(
+    state: State<'_, Arc<AppState>>,
+    config_id: String,
+) -> Result<()> {
+    {
+        let mut cfg = state.config.lock().await;
+        cfg.connections.retain(|c| c.id != config_id);
+        cfg.save(&state.config_path)?;
+    }
+    let _ = delete_secret(&config_id);
+    Ok(())
 }
 
 #[tauri::command]

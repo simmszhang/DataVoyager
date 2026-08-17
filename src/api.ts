@@ -149,6 +149,17 @@ export interface ConnectionSummary {
   server_version: string;
 }
 
+export interface SavedConnection {
+  id: string;
+  project_id: string;
+  name: string;
+  driver: string;
+  host: string;
+  port: number;
+  user: string;
+  database?: string | null;
+}
+
 // ---------- 历史 ----------
 
 export interface StatementHit {
@@ -190,6 +201,11 @@ export const api = {
     invoke<ConnectResponse>("connect", { params, projectId }),
   disconnect: (id: number) => invoke<void>("disconnect", { id }),
   listConnections: () => invoke<ConnectionSummary[]>("list_connections"),
+  listSavedConnections: (projectId?: string | null) =>
+    invoke<SavedConnection[]>("list_saved_connections", { projectId }),
+  reconnect: (configId: string) => invoke<ConnectResponse>("reconnect", { configId }),
+  deleteSavedConnection: (configId: string) =>
+    invoke<void>("delete_saved_connection", { configId }),
 
   listDatabases: (id: number) => invoke<string[]>("list_databases", { id }),
   listTables: (id: number, database: string) =>

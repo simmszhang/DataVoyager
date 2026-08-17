@@ -20,5 +20,7 @@ tauri = { version = "2", features = [] }
 serde.workspace = true
 chrono.workspace = true
 tokio = { version = "1", features = ["sync"] }
+keyring = "3"
+uuid.workspace = true
 dby-core = { path = "../crates/dby-core" }
 dby-driver-mysql = { path = "../crates/dby-driver-mysql" }

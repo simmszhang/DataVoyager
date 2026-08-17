@@ -334,6 +334,23 @@ impl HistoryStore {
             .map_err(DbError::from)
     }
 
+    /// 固定/取消固定某语句。
+    pub fn pin_statement(&self, hash: &str, pinned: bool) -> Result<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE statements SET pinned = ?1 WHERE sql_hash = ?2",
+            params![pinned as i64, hash],
+        )?;
+        Ok(())
+    }
+
+    /// 删除单条执行流水（审计记录）。
+    pub fn delete_execution(&self, id: &str) -> Result<()> {
+        let conn = self.lock()?;
+        conn.execute("DELETE FROM executions WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
     /// 清空某项目（或全部）的历史。
     pub fn clear(&self, project_id: Option<&str>) -> Result<()> {
         let conn = self.lock()?;
@@ -478,5 +495,20 @@ mod tests {
         store.clear(Some("p1")).unwrap();
         let f = HistoryFilter::new();
         assert_eq!(store.executions(&f).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn pin_and_delete_execution() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        let r = rec("p1", "SELECT 1");
+        let hash = sql_hash(&normalize_sql("SELECT 1"));
+        store.record(&r).unwrap();
+
+        store.pin_statement(&hash, true).unwrap();
+        let hits = store.statements(&HistoryFilter::new()).unwrap();
+        assert!(hits[0].pinned);
+
+        store.delete_execution(&r.id).unwrap();
+        assert!(store.executions(&HistoryFilter::new()).unwrap().is_empty());
     }
 }

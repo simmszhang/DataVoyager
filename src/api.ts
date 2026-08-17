@@ -232,4 +232,7 @@ export const api = {
     invoke<StatementHit[]>("list_history", { projectId }),
   listExecutions: (projectId?: string | null) =>
     invoke<ExecutionRecord[]>("list_executions", { projectId }),
+  pinStatement: (hash: string, pinned: boolean) =>
+    invoke<void>("pin_statement", { hash, pinned }),
+  deleteExecution: (id: string) => invoke<void>("delete_execution", { id }),
 };

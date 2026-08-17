@@ -52,6 +52,8 @@ pub fn run() {
             commands::search_history,
             commands::list_history,
             commands::list_executions,
+            commands::pin_statement,
+            commands::delete_execution,
         ])
         .run(tauri::generate_context!())
         .expect("error while running dby");

@@ -15,6 +15,7 @@ import SchemaPanel from "./components/SchemaPanel";
 import QueryEditor from "./components/QueryEditor";
 import ResultsGrid from "./components/ResultsGrid";
 import ExportDialog from "./components/ExportDialog";
+import HistoryPanel from "./components/HistoryPanel";
 import "./App.css";
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [showDialog, setShowDialog] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const [databases, setDatabases] = useState<string[]>([]);
   const [selectedDb, setSelectedDb] = useState("");
@@ -510,10 +512,16 @@ export default function App() {
               <p>点击「新建连接」开始，第一版支持 MySQL。</p>
             </div>
           )}
+          {showHistory && (
+            <HistoryPanel projectId={projectId} onLoadSql={(sql) => setQuery(sql)} />
+          )}
         </main>
       </div>
 
       <footer className="statusbar">
+        <button className="btn small" onClick={() => setShowHistory((v) => !v)}>
+          历史
+        </button>
         {inTransaction && <span className="txn-indicator">● 事务中</span>}
         <span className="status">{status ?? "就绪"}</span>
         <span className="spacer" />

@@ -286,6 +286,20 @@ pub async fn list_executions(
     state.history.executions(&filter)
 }
 
+#[tauri::command]
+pub async fn pin_statement(
+    state: State<'_, Arc<AppState>>,
+    hash: String,
+    pinned: bool,
+) -> Result<()> {
+    state.history.pin_statement(&hash, pinned)
+}
+
+#[tauri::command]
+pub async fn delete_execution(state: State<'_, Arc<AppState>>, id: String) -> Result<()> {
+    state.history.delete_execution(&id)
+}
+
 // ---------- 流式查询 + 取消 ----------
 
 /// 把流式事件转发到 Tauri Channel，并累计行数（供历史记录）。

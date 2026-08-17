@@ -287,6 +287,15 @@ impl Connection for MysqlConnection {
     async fn rollback(&mut self) -> Result<()> {
         self.conn.query_drop("ROLLBACK").await.map_err(db_err)
     }
+
+    async fn set_autocommit(&mut self, enabled: bool) -> Result<()> {
+        let sql = if enabled {
+            "SET autocommit = 1"
+        } else {
+            "SET autocommit = 0"
+        };
+        self.conn.query_drop(sql).await.map_err(db_err)
+    }
 }
 
 fn row_to_values(row: &Row) -> Vec<Value> {

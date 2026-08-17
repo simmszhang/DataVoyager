@@ -207,6 +207,12 @@ export const api = {
   cancelQuery: (id: number) => invoke<void>("cancel_query", { id }),
   analyzeDanger: (sql: string) => invoke<DangerLevel>("analyze_danger", { sql }),
 
+  begin: (id: number) => invoke<void>("begin", { id }),
+  commit: (id: number) => invoke<void>("commit", { id }),
+  rollback: (id: number) => invoke<void>("rollback", { id }),
+  setAutocommit: (id: number, enabled: boolean) =>
+    invoke<void>("set_autocommit", { id, enabled }),
+
   listProjects: () => invoke<Project[]>("list_projects"),
   createProject: (name: string) => invoke<Project>("create_project", { name }),
 

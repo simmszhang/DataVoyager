@@ -39,6 +39,8 @@ export default function App() {
     sql: string;
     reasons: string[];
   } | null>(null);
+  const [inTransaction, setInTransaction] = useState(false);
+  const [autocommit, setAutocommit] = useState(true);
 
   // 流式结果：ref 持有可变缓冲，tick 触发渲染（O(1) 追加）。
   const resultRef = useRef<StreamResult | null>(null);
@@ -102,6 +104,7 @@ export default function App() {
   async function handleSelectConnection(id: number) {
     setActiveId(id);
     resetResult();
+    resetTxn();
     setError(null);
     setSelectedTable(null);
     setColumns([]);
@@ -224,6 +227,54 @@ export default function App() {
     }
   }
 
+  function resetTxn() {
+    setInTransaction(false);
+    setAutocommit(true);
+  }
+
+  async function handleBegin() {
+    if (!activeId) return;
+    try {
+      await api.begin(activeId);
+      setInTransaction(true);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleCommit() {
+    if (!activeId) return;
+    try {
+      await api.commit(activeId);
+      setInTransaction(false);
+      setStatus("已提交");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleRollback() {
+    if (!activeId) return;
+    try {
+      await api.rollback(activeId);
+      setInTransaction(false);
+      setStatus("已回滚");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleToggleAutocommit() {
+    if (!activeId) return;
+    const next = !autocommit;
+    try {
+      await api.setAutocommit(activeId, next);
+      setAutocommit(next);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   // 快捷键：Ctrl/Cmd+Enter 运行（通过 ref 避免闭包过期）。
   const runRef = useRef<() => void>(() => {});
   runRef.current = handleRun;
@@ -250,6 +301,7 @@ export default function App() {
         setSelectedTable(null);
         setColumns([]);
         resetResult();
+        resetTxn();
         setStatus(null);
         setError(null);
       }
@@ -333,6 +385,12 @@ export default function App() {
                 onChange={setQuery}
                 onRun={handleRun}
                 onCancel={handleCancel}
+                inTransaction={inTransaction}
+                autocommit={autocommit}
+                onBegin={handleBegin}
+                onCommit={handleCommit}
+                onRollback={handleRollback}
+                onToggleAutocommit={handleToggleAutocommit}
               />
               <section className="results-panel">
                 {error ? (
@@ -356,6 +414,7 @@ export default function App() {
       </div>
 
       <footer className="statusbar">
+        {inTransaction && <span className="txn-indicator">● 事务中</span>}
         <span className="status">{status ?? "就绪"}</span>
         <span className="spacer" />
         <span>

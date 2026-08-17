@@ -338,3 +338,41 @@ pub async fn cancel_query(state: State<'_, Arc<AppState>>, id: u64) -> Result<()
 pub fn analyze_danger(sql: String) -> DangerLevel {
     dby_core::danger::analyze_danger(&sql)
 }
+
+// ---------- 事务 ----------
+
+#[tauri::command]
+pub async fn begin(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
+    let mut guard = state.connections.lock().await;
+    let active = guard
+        .get_mut(&id)
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    active.conn.begin().await
+}
+
+#[tauri::command]
+pub async fn commit(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
+    let mut guard = state.connections.lock().await;
+    let active = guard
+        .get_mut(&id)
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    active.conn.commit().await
+}
+
+#[tauri::command]
+pub async fn rollback(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
+    let mut guard = state.connections.lock().await;
+    let active = guard
+        .get_mut(&id)
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    active.conn.rollback().await
+}
+
+#[tauri::command]
+pub async fn set_autocommit(state: State<'_, Arc<AppState>>, id: u64, enabled: bool) -> Result<()> {
+    let mut guard = state.connections.lock().await;
+    let active = guard
+        .get_mut(&id)
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    active.conn.set_autocommit(enabled).await
+}

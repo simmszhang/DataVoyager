@@ -134,6 +134,7 @@ pub trait Connection: Send {
     async fn begin(&mut self) -> Result<()>;
     async fn commit(&mut self) -> Result<()>;
     async fn rollback(&mut self) -> Result<()>;
+    async fn set_autocommit(&mut self, enabled: bool) -> Result<()>;
 }
 
 /// 可打开某类数据库连接的驱动。

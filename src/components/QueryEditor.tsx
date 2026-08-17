@@ -8,6 +8,7 @@ interface Props {
   onChange: (value: string) => void;
   onRun: () => void;
   onCancel: () => void;
+  onExport: () => void;
   inTransaction: boolean;
   autocommit: boolean;
   onBegin: () => void;
@@ -22,6 +23,7 @@ export default function QueryEditor({
   onChange,
   onRun,
   onCancel,
+  onExport,
   inTransaction,
   autocommit,
   onBegin,
@@ -40,6 +42,9 @@ export default function QueryEditor({
             停止
           </button>
         )}
+        <button className="btn" onClick={onExport} disabled={running}>
+          导出
+        </button>
         <span className="toolbar-sep" />
         {inTransaction ? (
           <>

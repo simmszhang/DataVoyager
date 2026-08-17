@@ -44,6 +44,7 @@ pub fn run() {
             commands::commit,
             commands::rollback,
             commands::set_autocommit,
+            commands::export_result,
             commands::list_projects,
             commands::create_project,
             commands::rename_project,

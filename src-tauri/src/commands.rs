@@ -410,3 +410,72 @@ pub async fn set_autocommit(state: State<'_, Arc<AppState>>, id: u64, enabled: b
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     active.conn.set_autocommit(enabled).await
 }
+
+// ---------- 导出 ----------
+
+#[tauri::command]
+pub async fn export_result(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: Option<String>,
+    sql: String,
+    format: String,
+    table: Option<String>,
+) -> Result<String> {
+    let started = Utc::now();
+    let (project_id, conn_name, driver_id, output) = {
+        let mut guard = state.connections.lock().await;
+        let active = guard
+            .get_mut(&id)
+            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+        let project_id = active.project_id.clone();
+        let conn_name = active.name.clone();
+        let driver_id = active.driver_id.clone();
+        let output = execute_buffered(
+            active.conn.as_mut(),
+            database.as_deref(),
+            &sql,
+            &ExecOpts::default(),
+        )
+        .await;
+        (project_id, conn_name, driver_id, output)
+    };
+
+    // 记录历史（origin=export）
+    let duration_ms = (Utc::now() - started).num_milliseconds().max(0) as u64;
+    let mut rec = ExecutionRecord::new(project_id, sql.clone(), SqlOrigin::Export);
+    rec.connection_id = Some(id.to_string());
+    rec.connection_name = Some(conn_name);
+    rec.database = database.clone();
+    rec.duration_ms = duration_ms;
+    let output = match output {
+        Ok(o) => {
+            rec.status = "ok".to_string();
+            rec.rows_affected = o.affected_rows;
+            rec.row_count = o.first_result_set().map(|rs| rs.rows.len() as u64);
+            let _ = state.history.record(&rec);
+            o
+        }
+        Err(e) => {
+            rec.status = e.to_string();
+            let _ = state.history.record(&rec);
+            return Err(e);
+        }
+    };
+
+    let rs = output
+        .first_result_set()
+        .ok_or_else(|| DbError::Database("无结果集可导出".to_string()))?;
+    let driver = state.registry.resolve(&driver_id)?;
+    let text = match format.as_str() {
+        "csv" => dby_core::export::to_csv(rs),
+        "json" => dby_core::export::to_json(rs),
+        "markdown" => dby_core::export::to_markdown(rs),
+        "insert" => {
+            let t = table.ok_or_else(|| DbError::Config("INSERT 导出需要表名".to_string()))?;
+            dby_core::export::to_insert_sql(driver.dialect(), &t, rs)
+        }
+        other => return Err(DbError::Config(format!("未知导出格式: {other}"))),
+    };
+    Ok(text)
+}

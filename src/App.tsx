@@ -14,6 +14,7 @@ import ConnectionDialog from "./components/ConnectionDialog";
 import SchemaPanel from "./components/SchemaPanel";
 import QueryEditor from "./components/QueryEditor";
 import ResultsGrid from "./components/ResultsGrid";
+import ExportDialog from "./components/ExportDialog";
 import "./App.css";
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
   const [connections, setConnections] = useState<ConnectionSummary[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [showDialog, setShowDialog] = useState(false);
+  const [showExport, setShowExport] = useState(false);
 
   const [databases, setDatabases] = useState<string[]>([]);
   const [selectedDb, setSelectedDb] = useState("");
@@ -482,6 +484,7 @@ export default function App() {
                 onChange={setQuery}
                 onRun={handleRun}
                 onCancel={handleCancel}
+                onExport={() => setShowExport(true)}
                 inTransaction={inTransaction}
                 autocommit={autocommit}
                 onBegin={handleBegin}
@@ -525,6 +528,15 @@ export default function App() {
           projectId={projectId}
           onConnected={handleConnected}
           onClose={() => setShowDialog(false)}
+        />
+      )}
+
+      {showExport && activeId && (
+        <ExportDialog
+          connectionId={activeId}
+          database={selectedDb || null}
+          sql={query}
+          onClose={() => setShowExport(false)}
         />
       )}
 

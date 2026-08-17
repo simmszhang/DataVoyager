@@ -212,6 +212,13 @@ export const api = {
   rollback: (id: number) => invoke<void>("rollback", { id }),
   setAutocommit: (id: number, enabled: boolean) =>
     invoke<void>("set_autocommit", { id, enabled }),
+  exportResult: (
+    id: number,
+    database: string | null,
+    sql: string,
+    format: string,
+    table?: string | null,
+  ) => invoke<string>("export_result", { id, database, sql, format, table }),
 
   listProjects: () => invoke<Project[]>("list_projects"),
   createProject: (name: string) => invoke<Project>("create_project", { name }),

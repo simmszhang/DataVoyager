@@ -176,6 +176,11 @@ export interface ExecutionRecord {
   started_at: string;
 }
 
+export type DangerLevel =
+  | { level: "safe" }
+  | { level: "warn" }
+  | { level: "dangerous"; reasons: string[] };
+
 export const api = {
   listDrivers: () => invoke<DriverInfo[]>("list_drivers"),
   testConnection: (params: ConnectParams) =>
@@ -200,6 +205,7 @@ export const api = {
     sql: string,
   ) => invoke<void>("execute_query_stream", { channel, id, database, sql }),
   cancelQuery: (id: number) => invoke<void>("cancel_query", { id }),
+  analyzeDanger: (sql: string) => invoke<DangerLevel>("analyze_danger", { sql }),
 
   listProjects: () => invoke<Project[]>("list_projects"),
   createProject: (name: string) => invoke<Project>("create_project", { name }),

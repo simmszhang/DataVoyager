@@ -35,6 +35,10 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [pendingDanger, setPendingDanger] = useState<{
+    sql: string;
+    reasons: string[];
+  } | null>(null);
 
   // 流式结果：ref 持有可变缓冲，tick 触发渲染（O(1) 追加）。
   const resultRef = useRef<StreamResult | null>(null);
@@ -147,7 +151,7 @@ export default function App() {
     }
   }
 
-  async function handleRun() {
+  async function runQuery(sql: string) {
     if (!activeId) return;
     setRunning(true);
     setError(null);
@@ -182,7 +186,7 @@ export default function App() {
     };
 
     try {
-      await api.executeQueryStream(channel, activeId, selectedDb || null, query);
+      await api.executeQueryStream(channel, activeId, selectedDb || null, sql);
       const r = resultRef.current;
       setStatus(
         r && r.columns
@@ -194,6 +198,20 @@ export default function App() {
       setStatus("查询失败");
     } finally {
       setRunning(false);
+    }
+  }
+
+  async function handleRun() {
+    if (!activeId) return;
+    try {
+      const danger = await api.analyzeDanger(query);
+      if (danger.level === "dangerous") {
+        setPendingDanger({ sql: query, reasons: danger.reasons });
+        return;
+      }
+      await runQuery(query);
+    } catch (e) {
+      setError(String(e));
     }
   }
 
@@ -352,6 +370,43 @@ export default function App() {
           onConnected={handleConnected}
           onClose={() => setShowDialog(false)}
         />
+      )}
+
+      {pendingDanger && (
+        <div className="modal-backdrop" onClick={() => setPendingDanger(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>危险操作确认</h2>
+              <button className="icon-btn" onClick={() => setPendingDanger(null)}>
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="danger-hint">以下 SQL 可能破坏数据，请确认后执行：</p>
+              <pre className="danger-sql">{pendingDanger.sql}</pre>
+              <ul className="danger-reasons">
+                {pendingDanger.reasons.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setPendingDanger(null)}>
+                取消
+              </button>
+              <button
+                className="btn danger"
+                onClick={() => {
+                  const sql = pendingDanger.sql;
+                  setPendingDanger(null);
+                  runQuery(sql);
+                }}
+              >
+                确认执行
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

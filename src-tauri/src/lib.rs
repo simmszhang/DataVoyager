@@ -39,6 +39,7 @@ pub fn run() {
             commands::execute_query,
             commands::execute_query_stream,
             commands::cancel_query,
+            commands::analyze_danger,
             commands::list_projects,
             commands::create_project,
             commands::search_history,

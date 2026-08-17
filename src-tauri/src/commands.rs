@@ -4,6 +4,7 @@ use chrono::Utc;
 use serde::Serialize;
 use tauri::State;
 
+use dby_core::danger::DangerLevel;
 use dby_core::driver::{execute_buffered, ConnectParams, DriverInfo};
 use dby_core::error::{DbError, Result};
 use dby_core::history::{ExecutionRecord, HistoryFilter, StatementHit};
@@ -329,4 +330,11 @@ pub async fn cancel_query(state: State<'_, Arc<AppState>>, id: u64) -> Result<()
         active.cancel.cancel();
     }
     Ok(())
+}
+
+// ---------- 危险操作分析 ----------
+
+#[tauri::command]
+pub fn analyze_danger(sql: String) -> DangerLevel {
+    dby_core::danger::analyze_danger(&sql)
 }

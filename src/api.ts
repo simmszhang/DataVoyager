@@ -73,6 +73,13 @@ export interface ConnectParams {
   password?: string | null;
   database?: string | null;
   ssl?: { enabled: boolean; verify_cert?: boolean } | null;
+  ssh?: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    user: string;
+    password?: string | null;
+  } | null;
 }
 
 // ---------- 元数据 ----------

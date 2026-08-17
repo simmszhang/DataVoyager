@@ -18,6 +18,11 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
     database: "",
     ssl: false,
     verifyCert: true,
+    ssh: false,
+    sshHost: "",
+    sshPort: "22",
+    sshUser: "",
+    sshPassword: "",
   });
   const [busy, setBusy] = useState<null | "test" | "connect">(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -30,13 +35,22 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
     password: form.password,
     database: form.database.trim() || null,
     ssl: form.ssl ? { enabled: true, verify_cert: form.verifyCert } : null,
+    ssh: form.ssh
+      ? {
+          enabled: true,
+          host: form.sshHost.trim(),
+          port: Number(form.sshPort) || 22,
+          user: form.sshUser.trim(),
+          password: form.sshPassword || null,
+        }
+      : null,
   });
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
 
   const setBool =
-    (key: "ssl" | "verifyCert") => (e: React.ChangeEvent<HTMLInputElement>) =>
+    (key: "ssl" | "verifyCert" | "ssh") => (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((f) => ({ ...f, [key]: e.target.checked }));
 
   async function handleTest() {
@@ -117,7 +131,31 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
                   <span>校验证书</span>
                 </label>
               )}
+              <label className="checkbox">
+                <input type="checkbox" checked={form.ssh} onChange={setBool("ssh")} />
+                <span>使用 SSH 隧道</span>
+              </label>
             </div>
+            {form.ssh && (
+              <>
+                <label>
+                  <span>SSH 主机</span>
+                  <input value={form.sshHost} onChange={set("sshHost")} placeholder="ssh.example.com" />
+                </label>
+                <label>
+                  <span>SSH 端口</span>
+                  <input value={form.sshPort} onChange={set("sshPort")} placeholder="22" />
+                </label>
+                <label>
+                  <span>SSH 用户</span>
+                  <input value={form.sshUser} onChange={set("sshUser")} placeholder="user" />
+                </label>
+                <label>
+                  <span>SSH 密码</span>
+                  <input type="password" value={form.sshPassword} onChange={set("sshPassword")} />
+                </label>
+              </>
+            )}
           </div>
 
           {message && (

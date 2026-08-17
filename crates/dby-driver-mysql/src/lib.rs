@@ -2,6 +2,7 @@
 
 mod conv;
 mod dialect;
+mod tunnel;
 
 use async_trait::async_trait;
 use dby_core::dialect::Dialect;
@@ -54,9 +55,18 @@ impl Driver for MysqlDriver {
     }
 
     async fn connect(&self, params: &ConnectParams) -> Result<Box<dyn Connection + Send>> {
+        // SSH 隧道：本地端口转发到远端 MySQL
+        let (host, port, ssh) = match &params.ssh {
+            Some(ssh) if ssh.enabled => {
+                let t = tunnel::start_tunnel(ssh, &params.host, params.port).await?;
+                ("127.0.0.1".to_string(), t.local_port, Some(t))
+            }
+            _ => (params.host.clone(), params.port, None),
+        };
+
         let mut opts = OptsBuilder::default()
-            .ip_or_hostname(params.host.clone())
-            .tcp_port(params.port)
+            .ip_or_hostname(host)
+            .tcp_port(port)
             .user(Some(params.user.clone()))
             .pass(params.password.clone())
             .db_name(params.database.clone());
@@ -76,6 +86,7 @@ impl Driver for MysqlDriver {
         Ok(Box::new(MysqlConnection {
             conn,
             version: format!("{major}.{minor}.{patch}"),
+            _ssh: ssh,
         }))
     }
 }
@@ -83,6 +94,7 @@ impl Driver for MysqlDriver {
 pub struct MysqlConnection {
     conn: Conn,
     version: String,
+    _ssh: Option<tunnel::SshTunnel>,
 }
 
 #[async_trait]

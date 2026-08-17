@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
 
 use dby_core::config::AppConfig;
 use dby_core::driver::{Connection, DriverRegistry};
 use dby_core::history::HistoryStore;
+use dby_core::query::CancellationToken;
+use tokio::sync::Mutex;
 
-/// 一条活跃连接，归属某项目。
+/// 一条活跃连接，归属某项目，带独立取消令牌。
 pub struct ActiveConnection {
     pub id: u64,
     pub name: String,
@@ -15,6 +16,7 @@ pub struct ActiveConnection {
     pub project_id: String,
     pub database: String,
     pub server_version: String,
+    pub cancel: CancellationToken,
     pub conn: Box<dyn Connection + Send>,
 }
 
@@ -47,14 +49,16 @@ impl AppState {
     }
 
     /// 解析项目 id：显式指定优先，否则用第一个项目。
-    pub fn resolve_project_id(&self, requested: Option<String>) -> String {
+    pub async fn resolve_project_id(&self, requested: Option<String>) -> String {
         if let Some(id) = requested.filter(|s| !s.trim().is_empty()) {
             return id;
         }
         self.config
             .lock()
-            .ok()
-            .and_then(|c| c.projects.first().map(|p| p.id.clone()))
+            .await
+            .projects
+            .first()
+            .map(|p| p.id.clone())
             .unwrap_or_default()
     }
 }

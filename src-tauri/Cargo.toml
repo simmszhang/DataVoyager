@@ -19,5 +19,6 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde.workspace = true
 chrono.workspace = true
+tokio = { version = "1", features = ["sync"] }
 dby-core = { path = "../crates/dby-core" }
 dby-driver-mysql = { path = "../crates/dby-driver-mysql" }

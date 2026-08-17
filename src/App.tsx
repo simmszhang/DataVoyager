@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Channel } from "@tauri-apps/api/core";
 import {
   api,
   ColumnInfo,
   ConnectionSummary,
   DriverInfo,
   Project,
-  QueryOutput,
+  StreamEvent,
+  StreamResult,
   TableInfo,
 } from "./api";
 import ConnectionDialog from "./components/ConnectionDialog";
@@ -31,9 +33,12 @@ export default function App() {
 
   const [query, setQuery] = useState("SELECT 1");
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<QueryOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+
+  // 流式结果：ref 持有可变缓冲，tick 触发渲染（O(1) 追加）。
+  const resultRef = useRef<StreamResult | null>(null);
+  const [, setTick] = useState(0);
 
   const activeConn = connections.find((c) => c.id === activeId) ?? null;
 
@@ -60,6 +65,11 @@ export default function App() {
     }
   }, []);
 
+  function resetResult() {
+    resultRef.current = null;
+    setTick((t) => t + 1);
+  }
+
   async function handleConnected() {
     setShowDialog(false);
     try {
@@ -67,10 +77,10 @@ export default function App() {
       setConnections(list);
       const newest = list[list.length - 1];
       setActiveId(newest.id);
-      setStatus(`已连接 ${newest.name}（MySQL ${newest.server_version}）`);
+      setStatus(`已连接 ${newest.name}（${newest.server_version}）`);
       setSelectedTable(null);
       setColumns([]);
-      setResult(null);
+      resetResult();
       setError(null);
       await loadDatabases(newest.id);
       const db = newest.database;
@@ -87,7 +97,7 @@ export default function App() {
 
   async function handleSelectConnection(id: number) {
     setActiveId(id);
-    setResult(null);
+    resetResult();
     setError(null);
     setSelectedTable(null);
     setColumns([]);
@@ -141,13 +151,43 @@ export default function App() {
     if (!activeId) return;
     setRunning(true);
     setError(null);
+    resultRef.current = {
+      columns: null,
+      rows: [],
+      affected_rows: 0,
+      last_insert_id: null,
+      truncated: false,
+    };
+    setTick((t) => t + 1);
+
+    const channel = new Channel<StreamEvent>();
+    channel.onmessage = (ev) => {
+      const r = resultRef.current;
+      if (!r) return;
+      switch (ev.event) {
+        case "columns":
+          r.columns = ev.data;
+          break;
+        case "rows":
+          r.rows.push(...ev.data);
+          break;
+        case "affected":
+          r.affected_rows = ev.data.affected_rows;
+          r.last_insert_id = ev.data.last_insert_id;
+          break;
+        case "info":
+          break;
+      }
+      setTick((t) => t + 1);
+    };
+
     try {
-      const res = await api.executeQuery(activeId, selectedDb || null, query);
-      setResult(res);
+      await api.executeQueryStream(channel, activeId, selectedDb || null, query);
+      const r = resultRef.current;
       setStatus(
-        res.result_sets.length === 0
-          ? `影响 ${res.affected_rows} 行`
-          : `返回 ${res.result_sets[0]?.rows.length ?? 0} 行`,
+        r && r.columns
+          ? `返回 ${r.rows.length} 行`
+          : `影响 ${r?.affected_rows ?? 0} 行`,
       );
     } catch (e) {
       setError(String(e));
@@ -157,7 +197,16 @@ export default function App() {
     }
   }
 
-  // Keep the latest run handler available to the global shortcut without stale closures.
+  async function handleCancel() {
+    if (!activeId) return;
+    try {
+      await api.cancelQuery(activeId);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  // 快捷键：Ctrl/Cmd+Enter 运行（通过 ref 避免闭包过期）。
   const runRef = useRef<() => void>(() => {});
   runRef.current = handleRun;
   useEffect(() => {
@@ -182,7 +231,7 @@ export default function App() {
         setTables([]);
         setSelectedTable(null);
         setColumns([]);
-        setResult(null);
+        resetResult();
         setStatus(null);
         setError(null);
       }
@@ -190,6 +239,8 @@ export default function App() {
       setError(String(e));
     }
   }
+
+  const result = resultRef.current;
 
   return (
     <div className="app">
@@ -199,7 +250,7 @@ export default function App() {
           {activeConn ? (
             <>
               <span className="conn-name">{activeConn.name}</span>
-              <span className="conn-ver">MySQL {activeConn.server_version}</span>
+              <span className="conn-ver">{activeConn.server_version}</span>
               {activeConn.database && <span className="conn-db">{activeConn.database}</span>}
             </>
           ) : (
@@ -263,6 +314,7 @@ export default function App() {
                 running={running}
                 onChange={setQuery}
                 onRun={handleRun}
+                onCancel={handleCancel}
               />
               <section className="results-panel">
                 {error ? (

@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::dialect::Dialect;
@@ -10,7 +11,7 @@ use crate::error::{DbError, Result};
 use crate::metadata::{
     ColumnInfo, ForeignKeyInfo, IndexInfo, ProcedureInfo, TableInfo, TriggerInfo,
 };
-use crate::query::{ExecOpts, QueryOutput};
+use crate::query::{CollectingSink, ExecOpts, QueryOutput, ResultSink};
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ConnectParams {
@@ -105,36 +106,44 @@ pub struct DriverInfo {
     pub capabilities: Capabilities,
 }
 
-/// 一条活跃连接。
+/// 一条活跃连接（异步）。
+#[async_trait]
 pub trait Connection: Send {
-    fn ping(&mut self) -> Result<()>;
+    async fn ping(&mut self) -> Result<()>;
     fn server_version(&self) -> String;
 
-    fn catalogs(&mut self) -> Result<Vec<String>>;
-    fn schemas(&mut self, catalog: Option<&str>) -> Result<Vec<String>>;
-    fn tables(&mut self, schema: &str) -> Result<Vec<TableInfo>>;
-    fn columns(&mut self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>>;
-    fn indexes(&mut self, schema: &str, table: &str) -> Result<Vec<IndexInfo>>;
-    fn foreign_keys(&mut self, schema: &str, table: &str) -> Result<Vec<ForeignKeyInfo>>;
-    fn triggers(&mut self, schema: &str, table: &str) -> Result<Vec<TriggerInfo>>;
-    fn procedures(&mut self, schema: &str) -> Result<Vec<ProcedureInfo>>;
-    fn table_ddl(&mut self, schema: &str, table: &str) -> Result<String>;
+    async fn catalogs(&mut self) -> Result<Vec<String>>;
+    async fn schemas(&mut self, catalog: Option<&str>) -> Result<Vec<String>>;
+    async fn tables(&mut self, schema: &str) -> Result<Vec<TableInfo>>;
+    async fn columns(&mut self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>>;
+    async fn indexes(&mut self, schema: &str, table: &str) -> Result<Vec<IndexInfo>>;
+    async fn foreign_keys(&mut self, schema: &str, table: &str) -> Result<Vec<ForeignKeyInfo>>;
+    async fn triggers(&mut self, schema: &str, table: &str) -> Result<Vec<TriggerInfo>>;
+    async fn procedures(&mut self, schema: &str) -> Result<Vec<ProcedureInfo>>;
+    async fn table_ddl(&mut self, schema: &str, table: &str) -> Result<String>;
 
-    fn execute(&mut self, schema: Option<&str>, sql: &str, opts: &ExecOpts) -> Result<QueryOutput>;
+    /// 流式执行：结果通过 `sink` 逐批吐出（SELECT 吐 Columns+Rows，DML 吐 Affected）。
+    async fn execute_stream(
+        &mut self,
+        schema: Option<&str>,
+        sql: &str,
+        opts: &ExecOpts,
+        sink: &mut dyn ResultSink,
+    ) -> Result<()>;
 
-    fn begin(&mut self) -> Result<()>;
-    fn commit(&mut self) -> Result<()>;
-    fn rollback(&mut self) -> Result<()>;
-    fn cancel(&self) -> Result<()>;
+    async fn begin(&mut self) -> Result<()>;
+    async fn commit(&mut self) -> Result<()>;
+    async fn rollback(&mut self) -> Result<()>;
 }
 
 /// 可打开某类数据库连接的驱动。
+#[async_trait]
 pub trait Driver: Send + Sync {
     fn id(&self) -> &'static str;
     fn display_name(&self) -> &'static str;
     fn capabilities(&self) -> Capabilities;
     fn dialect(&self) -> &dyn Dialect;
-    fn connect(&self, params: &ConnectParams) -> Result<Box<dyn Connection + Send>>;
+    async fn connect(&self, params: &ConnectParams) -> Result<Box<dyn Connection + Send>>;
 }
 
 /// 驱动注册表，按 id 索引。新增数据库 = 实现 `Driver` + 在这里登记。
@@ -185,4 +194,16 @@ impl DriverRegistry {
             None => Err(DbError::DriverNotFound("<none>".to_string())),
         }
     }
+}
+
+/// 缓冲执行：把流式事件收集成 `QueryOutput`（元数据/编辑/导出/事务内小结果用）。
+pub async fn execute_buffered(
+    conn: &mut dyn Connection,
+    schema: Option<&str>,
+    sql: &str,
+    opts: &ExecOpts,
+) -> Result<QueryOutput> {
+    let mut sink = CollectingSink::new(opts.max_rows);
+    conn.execute_stream(schema, sql, opts, &mut sink).await?;
+    Ok(sink.into_output())
 }

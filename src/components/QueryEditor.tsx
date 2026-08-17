@@ -7,15 +7,21 @@ interface Props {
   running: boolean;
   onChange: (value: string) => void;
   onRun: () => void;
+  onCancel: () => void;
 }
 
-export default function QueryEditor({ value, running, onChange, onRun }: Props) {
+export default function QueryEditor({ value, running, onChange, onRun, onCancel }: Props) {
   return (
     <div className="editor-wrap">
       <div className="editor-toolbar">
         <button className="btn primary" onClick={onRun} disabled={running}>
           {running ? "执行中…" : "运行 (Ctrl+Enter)"}
         </button>
+        {running && (
+          <button className="btn" onClick={onCancel}>
+            停止
+          </button>
+        )}
       </div>
       <div className="editor">
         <CodeMirror

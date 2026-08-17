@@ -1,7 +1,7 @@
-import { CellValue, QueryOutput, displayCell } from "../api";
+import { CellValue, StreamResult, displayCell } from "../api";
 
 interface Props {
-  result: QueryOutput;
+  result: StreamResult;
 }
 
 function Cell({ value }: { value: CellValue }) {
@@ -20,9 +20,7 @@ function Cell({ value }: { value: CellValue }) {
 }
 
 export default function ResultsGrid({ result }: Props) {
-  const set = result.result_sets[0];
-
-  if (!set || set.columns.length === 0) {
+  if (!result.columns) {
     return (
       <div className="result-message">
         语句执行成功，影响 {result.affected_rows} 行
@@ -31,12 +29,11 @@ export default function ResultsGrid({ result }: Props) {
     );
   }
 
-  const { columns, rows } = set;
+  const { columns, rows } = result;
   return (
     <div className="results">
       <div className="result-meta">
-        返回 {rows.length} 行{set.truncated ? "（已截断，仅显示前 2000 行）" : ""}
-        {result.result_sets.length > 1 ? ` · ${result.result_sets.length} 个结果集` : ""}
+        返回 {rows.length} 行{result.truncated ? "（已截断，仅显示前 2000 行）" : ""}
       </div>
       <div className="grid-wrap">
         <table className="grid">

@@ -1,30 +1,33 @@
-//! MySQL 驱动：实现 `dby_core::driver::{Driver, Connection}`。
+//! MySQL 驱动：实现 `dby_core::driver::{Driver, Connection}`（异步、流式）。
 
 mod conv;
 mod dialect;
 
+use async_trait::async_trait;
 use dby_core::dialect::Dialect;
 use dby_core::driver::{Capabilities, ConnectParams, Connection, Driver};
 use dby_core::error::{DbError, Result};
 use dby_core::metadata::{
     ColumnInfo, ForeignKeyInfo, IndexInfo, ProcedureInfo, TableInfo, TriggerInfo,
 };
-use dby_core::query::{ExecOpts, QueryOutput, ResultSet};
+use dby_core::query::{ExecOpts, ResultSink, StreamEvent};
 use dby_core::value::Value;
 
-use mysql::prelude::Queryable;
-use mysql::{Conn, OptsBuilder, Row};
+use mysql_async::prelude::Queryable;
+use mysql_async::{Conn, OptsBuilder, Row};
 
 pub use dialect::MysqlDialect;
 
-const DEFAULT_MAX_ROWS: usize = 2000;
+/// 每批推送的行数（降低 IPC 频率）。
+const BATCH_ROWS: usize = 100;
 
-fn db_err(e: mysql::Error) -> DbError {
+fn db_err(e: mysql_async::Error) -> DbError {
     DbError::Database(e.to_string())
 }
 
 pub struct MysqlDriver;
 
+#[async_trait]
 impl Driver for MysqlDriver {
     fn id(&self) -> &'static str {
         "mysql"
@@ -41,7 +44,7 @@ impl Driver for MysqlDriver {
             supports_catalogs: false, // MySQL 无 catalog 概念
             supports_schemas: true,   // 数据库即 schema
             supports_procedures: true,
-            supports_cancel: false, // 同步连接暂不支持取消（M1 流式引擎引入）
+            supports_cancel: true, // 流式 + 取消已支持
             supports_data_edit: true,
         }
     }
@@ -50,14 +53,14 @@ impl Driver for MysqlDriver {
         &MysqlDialect
     }
 
-    fn connect(&self, params: &ConnectParams) -> Result<Box<dyn Connection + Send>> {
-        let opts = OptsBuilder::new()
-            .ip_or_hostname(Some(params.host.clone()))
+    async fn connect(&self, params: &ConnectParams) -> Result<Box<dyn Connection + Send>> {
+        let opts = OptsBuilder::default()
+            .ip_or_hostname(params.host.clone())
             .tcp_port(params.port)
             .user(Some(params.user.clone()))
             .pass(params.password.clone())
             .db_name(params.database.clone());
-        let conn = Conn::new(opts).map_err(db_err)?;
+        let conn = Conn::new(opts).await.map_err(db_err)?;
         let (major, minor, patch) = conn.server_version();
         Ok(Box::new(MysqlConnection {
             conn,
@@ -71,31 +74,32 @@ pub struct MysqlConnection {
     version: String,
 }
 
+#[async_trait]
 impl Connection for MysqlConnection {
-    fn ping(&mut self) -> Result<()> {
-        self.conn.ping().map_err(db_err)
+    async fn ping(&mut self) -> Result<()> {
+        self.conn.ping().await.map_err(db_err)
     }
 
     fn server_version(&self) -> String {
         self.version.clone()
     }
 
-    fn catalogs(&mut self) -> Result<Vec<String>> {
+    async fn catalogs(&mut self) -> Result<Vec<String>> {
         Ok(vec![])
     }
 
-    fn schemas(&mut self, _catalog: Option<&str>) -> Result<Vec<String>> {
-        let rows: Vec<Row> = self.conn.query("SHOW DATABASES").map_err(db_err)?;
+    async fn schemas(&mut self, _catalog: Option<&str>) -> Result<Vec<String>> {
+        let rows: Vec<Row> = self.conn.query("SHOW DATABASES").await.map_err(db_err)?;
         Ok(rows
             .into_iter()
             .filter_map(|r| conv::row_string(&r, 0))
             .collect())
     }
 
-    fn tables(&mut self, schema: &str) -> Result<Vec<TableInfo>> {
+    async fn tables(&mut self, schema: &str) -> Result<Vec<TableInfo>> {
         let sql = "SELECT TABLE_NAME, TABLE_TYPE, TABLE_COMMENT \
                    FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME";
-        let rows: Vec<Row> = self.conn.exec(sql, (schema,)).map_err(db_err)?;
+        let rows: Vec<Row> = self.conn.exec(sql, (schema,)).await.map_err(db_err)?;
         Ok(rows
             .into_iter()
             .map(|r| TableInfo {
@@ -106,11 +110,11 @@ impl Connection for MysqlConnection {
             .collect())
     }
 
-    fn columns(&mut self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>> {
+    async fn columns(&mut self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>> {
         let sql = "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, COLUMN_COMMENT \
                    FROM information_schema.COLUMNS \
                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION";
-        let rows: Vec<Row> = self.conn.exec(sql, (schema, table)).map_err(db_err)?;
+        let rows: Vec<Row> = self.conn.exec(sql, (schema, table)).await.map_err(db_err)?;
         Ok(rows
             .into_iter()
             .map(|r| ColumnInfo {
@@ -124,14 +128,13 @@ impl Connection for MysqlConnection {
             .collect())
     }
 
-    fn indexes(&mut self, schema: &str, table: &str) -> Result<Vec<IndexInfo>> {
+    async fn indexes(&mut self, schema: &str, table: &str) -> Result<Vec<IndexInfo>> {
         let sql = format!(
             "SHOW INDEX FROM {} FROM {}",
             MysqlDialect.quote_identifier(table),
             MysqlDialect.quote_identifier(schema)
         );
-        let rows: Vec<Row> = self.conn.query(sql).map_err(db_err)?;
-        // 列：Table, Non_unique, Key_name, Seq_in_index, Column_name, ...
+        let rows: Vec<Row> = self.conn.query(sql).await.map_err(db_err)?;
         let mut indexes: Vec<IndexInfo> = Vec::new();
         for r in &rows {
             let name = conv::row_string(r, 2).unwrap_or_default();
@@ -150,18 +153,18 @@ impl Connection for MysqlConnection {
         Ok(indexes)
     }
 
-    fn foreign_keys(&mut self, schema: &str, table: &str) -> Result<Vec<ForeignKeyInfo>> {
+    async fn foreign_keys(&mut self, schema: &str, table: &str) -> Result<Vec<ForeignKeyInfo>> {
         let sql = "SELECT CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME \
                    FROM information_schema.KEY_COLUMN_USAGE \
                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL \
                    ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION";
-        let rows: Vec<Row> = self.conn.exec(sql, (schema, table)).map_err(db_err)?;
+        let rows: Vec<Row> = self.conn.exec(sql, (schema, table)).await.map_err(db_err)?;
         let mut fks: Vec<ForeignKeyInfo> = Vec::new();
         for r in &rows {
-            let name = conv::row_string(&r, 0).unwrap_or_default();
-            let column = conv::row_string(&r, 1).unwrap_or_default();
-            let ref_table = conv::row_string(&r, 2).unwrap_or_default();
-            let ref_col = conv::row_string(&r, 3).unwrap_or_default();
+            let name = conv::row_string(r, 0).unwrap_or_default();
+            let column = conv::row_string(r, 1).unwrap_or_default();
+            let ref_table = conv::row_string(r, 2).unwrap_or_default();
+            let ref_col = conv::row_string(r, 3).unwrap_or_default();
             if let Some(fk) = fks.iter_mut().find(|f| f.name == name) {
                 fk.columns.push(column);
                 fk.referenced_columns.push(ref_col);
@@ -177,11 +180,11 @@ impl Connection for MysqlConnection {
         Ok(fks)
     }
 
-    fn triggers(&mut self, schema: &str, table: &str) -> Result<Vec<TriggerInfo>> {
+    async fn triggers(&mut self, schema: &str, table: &str) -> Result<Vec<TriggerInfo>> {
         let sql = "SELECT TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION \
                    FROM information_schema.TRIGGERS \
                    WHERE TRIGGER_SCHEMA = ? AND EVENT_OBJECT_TABLE = ? ORDER BY TRIGGER_NAME";
-        let rows: Vec<Row> = self.conn.exec(sql, (schema, table)).map_err(db_err)?;
+        let rows: Vec<Row> = self.conn.exec(sql, (schema, table)).await.map_err(db_err)?;
         Ok(rows
             .into_iter()
             .map(|r| TriggerInfo {
@@ -192,10 +195,10 @@ impl Connection for MysqlConnection {
             .collect())
     }
 
-    fn procedures(&mut self, schema: &str) -> Result<Vec<ProcedureInfo>> {
+    async fn procedures(&mut self, schema: &str) -> Result<Vec<ProcedureInfo>> {
         let sql = "SELECT ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.ROUTINES \
                    WHERE ROUTINE_SCHEMA = ? ORDER BY ROUTINE_NAME";
-        let rows: Vec<Row> = self.conn.exec(sql, (schema,)).map_err(db_err)?;
+        let rows: Vec<Row> = self.conn.exec(sql, (schema,)).await.map_err(db_err)?;
         Ok(rows
             .into_iter()
             .map(|r| ProcedureInfo {
@@ -205,88 +208,90 @@ impl Connection for MysqlConnection {
             .collect())
     }
 
-    fn table_ddl(&mut self, schema: &str, table: &str) -> Result<String> {
+    async fn table_ddl(&mut self, schema: &str, table: &str) -> Result<String> {
         let sql = format!(
             "SHOW CREATE TABLE {}.{}",
             MysqlDialect.quote_identifier(schema),
             MysqlDialect.quote_identifier(table)
         );
-        let rows: Vec<Row> = self.conn.query(sql).map_err(db_err)?;
+        let rows: Vec<Row> = self.conn.query(sql).await.map_err(db_err)?;
         rows.into_iter()
             .next()
             .and_then(|r| conv::row_string(&r, 1))
             .ok_or_else(|| DbError::Database(format!("no DDL for {schema}.{table}")))
     }
 
-    fn execute(&mut self, schema: Option<&str>, sql: &str, opts: &ExecOpts) -> Result<QueryOutput> {
+    async fn execute_stream(
+        &mut self,
+        schema: Option<&str>,
+        sql: &str,
+        opts: &ExecOpts,
+        sink: &mut dyn ResultSink,
+    ) -> Result<()> {
         if let Some(db) = schema {
             if !db.is_empty() {
-                self.conn.select_db(db).map_err(db_err)?;
+                self.conn
+                    .query_drop(format!("USE {}", MysqlDialect.quote_identifier(db)))
+                    .await
+                    .map_err(db_err)?;
             }
         }
-        let max_rows = opts.max_rows.unwrap_or(DEFAULT_MAX_ROWS);
-        let mut qr = self.conn.query_iter(sql).map_err(db_err)?;
-        let mut output = QueryOutput::default();
 
-        let columns: Vec<ColumnInfo> = qr
-            .columns()
-            .as_ref()
-            .iter()
-            .map(|c| ColumnInfo {
-                name: c.name_str().to_string(),
-                type_name: MysqlDialect.display_type_name(&format!("{:?}", c.column_type())),
-                nullable: None,
-                primary_key: None,
-                default: None,
-                comment: None,
-            })
-            .collect();
+        let mut qr = self.conn.query_iter(sql).await.map_err(db_err)?;
+        if let Some(cols) = qr.columns() {
+            let columns: Vec<ColumnInfo> = cols
+                .iter()
+                .map(|c| ColumnInfo {
+                    name: c.name_str().to_string(),
+                    type_name: MysqlDialect.display_type_name(&format!("{:?}", c.column_type())),
+                    nullable: None,
+                    primary_key: None,
+                    default: None,
+                    comment: None,
+                })
+                .collect();
+            sink.on_event(StreamEvent::Columns(columns));
 
-        if columns.is_empty() {
-            output.affected_rows = qr.affected_rows();
-            output.last_insert_id = qr.last_insert_id();
-        } else {
-            let mut rows: Vec<Vec<Value>> = Vec::new();
-            let mut truncated = false;
-            for row in qr.by_ref() {
-                let row = row.map_err(db_err)?;
-                if rows.len() < max_rows {
-                    rows.push(row_to_values(&row));
-                } else {
-                    truncated = true;
+            let mut batch = Vec::with_capacity(BATCH_ROWS);
+            while let Some(row) = qr.next().await.map_err(db_err)? {
+                batch.push(row_to_values(&row));
+                if batch.len() >= BATCH_ROWS {
+                    sink.on_event(StreamEvent::Rows(std::mem::take(&mut batch)));
+                }
+                if let Some(tok) = &opts.cancel {
+                    if tok.is_cancelled() {
+                        return Err(DbError::Cancelled);
+                    }
                 }
             }
-            output.result_sets.push(ResultSet {
-                columns,
-                rows,
-                truncated,
+            if !batch.is_empty() {
+                sink.on_event(StreamEvent::Rows(batch));
+            }
+        } else {
+            sink.on_event(StreamEvent::Affected {
+                affected_rows: qr.affected_rows(),
+                last_insert_id: qr.last_insert_id(),
             });
         }
-        Ok(output)
+        Ok(())
     }
 
-    fn begin(&mut self) -> Result<()> {
-        self.conn.query_drop("START TRANSACTION").map_err(db_err)
+    async fn begin(&mut self) -> Result<()> {
+        self.conn.query_drop("START TRANSACTION").await.map_err(db_err)
     }
 
-    fn commit(&mut self) -> Result<()> {
-        self.conn.query_drop("COMMIT").map_err(db_err)
+    async fn commit(&mut self) -> Result<()> {
+        self.conn.query_drop("COMMIT").await.map_err(db_err)
     }
 
-    fn rollback(&mut self) -> Result<()> {
-        self.conn.query_drop("ROLLBACK").map_err(db_err)
-    }
-
-    fn cancel(&self) -> Result<()> {
-        Err(DbError::Unsupported(
-            "同步 MySQL 驱动暂不支持取消（M1 流式引擎引入）".to_string(),
-        ))
+    async fn rollback(&mut self) -> Result<()> {
+        self.conn.query_drop("ROLLBACK").await.map_err(db_err)
     }
 }
 
 fn row_to_values(row: &Row) -> Vec<Value> {
     (0..row.len())
-        .map(|i| match row.get::<mysql::Value, usize>(i) {
+        .map(|i| match row.get::<mysql_async::Value, usize>(i) {
             Some(v) => conv::mysql_value_to_dby(&v),
             None => Value::Null,
         })

@@ -1,7 +1,7 @@
-//! `mysql::Value` → `dby_core::Value` 转换。
+//! `mysql_async::Value` → `dby_core::Value` 转换。
 
 use dby_core::value::Value;
-use mysql::Value as MyValue;
+use mysql_async::Value as MyValue;
 
 /// 把 MySQL 单元格值转换为统一 Value。
 ///
@@ -37,7 +37,7 @@ pub fn mysql_value_to_dby(v: &MyValue) -> Value {
 }
 
 /// 以 `String` 读取单元格（NULL 或非文本返回 None，非 panicking）。
-pub fn row_string(row: &mysql::Row, index: usize) -> Option<String> {
+pub fn row_string(row: &mysql_async::Row, index: usize) -> Option<String> {
     row.get_opt::<String, usize>(index).and_then(|r| r.ok())
 }
 

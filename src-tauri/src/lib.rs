@@ -37,6 +37,8 @@ pub fn run() {
             commands::list_tables,
             commands::list_columns,
             commands::execute_query,
+            commands::execute_query_stream,
+            commands::cancel_query,
             commands::list_projects,
             commands::create_project,
             commands::search_history,

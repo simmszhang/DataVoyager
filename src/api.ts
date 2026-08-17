@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 // ---------- 值类型（带 tag 的 envelope） ----------
 
@@ -104,6 +104,22 @@ export interface QueryOutput {
   info?: string | null;
 }
 
+// ---------- 流式 ----------
+
+export type StreamEvent =
+  | { event: "columns"; data: ColumnInfo[] }
+  | { event: "rows"; data: CellValue[][] }
+  | { event: "affected"; data: { affected_rows: number; last_insert_id: number | null } }
+  | { event: "info"; data: string | null };
+
+export interface StreamResult {
+  columns: ColumnInfo[] | null;
+  rows: CellValue[][];
+  affected_rows: number;
+  last_insert_id: number | null;
+  truncated: boolean;
+}
+
 // ---------- 项目 / 连接 ----------
 
 export interface Project {
@@ -177,6 +193,13 @@ export const api = {
     invoke<ColumnInfo[]>("list_columns", { id, database, table }),
   executeQuery: (id: number, database: string | null, sql: string) =>
     invoke<QueryOutput>("execute_query", { id, database, sql }),
+  executeQueryStream: (
+    channel: Channel<StreamEvent>,
+    id: number,
+    database: string | null,
+    sql: string,
+  ) => invoke<void>("execute_query_stream", { channel, id, database, sql }),
+  cancelQuery: (id: number) => invoke<void>("cancel_query", { id }),
 
   listProjects: () => invoke<Project[]>("list_projects"),
   createProject: (name: string) => invoke<Project>("create_project", { name }),

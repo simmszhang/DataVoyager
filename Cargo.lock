@@ -855,6 +855,7 @@ dependencies = [
  "chrono",
  "dby-core",
  "dby-driver-mysql",
+ "futures",
  "keyring",
  "log",
  "serde",

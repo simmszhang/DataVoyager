@@ -4,8 +4,8 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use dby_core::danger::DangerLevel;
 use dby_core::config::ConnectionConfig;
+use dby_core::danger::DangerLevel;
 use dby_core::ddl::ColumnDef;
 use dby_core::driver::{execute_buffered, ConnectParams, Driver, DriverInfo};
 use dby_core::error::{DbError, Result};
@@ -171,7 +171,7 @@ async fn persist_connection(
     // secrets 先存、config 后存：避免「config 已存但 secret 缺失」半失败态
     if remember_password {
         if let Err(e) = (secrets.store)(&config_id, params) {
-            state.connections.lock().await.remove(&resp_id); // 断开不留孤儿；未存 config，可安全失败
+            state.connections.lock().unwrap().remove(&resp_id); // 断开不留孤儿；未存 config，可安全失败
             return Err(e);
         }
     }
@@ -180,7 +180,7 @@ async fn persist_connection(
         if remember_password {
             (secrets.delete)(&config_id);
         }
-        state.connections.lock().await.remove(&resp_id);
+        state.connections.lock().unwrap().remove(&resp_id);
         return Err(e);
     }
     Ok(())
@@ -267,10 +267,15 @@ async fn open_session(
         project_id: project_id.clone(),
         database: database.clone(),
         server_version: server_version.clone(),
-        cancel: dby_core::query::CancellationToken::new(),
+        params: params.clone(),
+        needs_reconnect: false,
         conn,
     };
-    state.connections.lock().await.insert(id, active);
+    state
+        .connections
+        .lock()
+        .unwrap()
+        .insert(id, Arc::new(futures::lock::Mutex::new(active)));
     Ok(ConnectResponse {
         id,
         name,
@@ -453,24 +458,36 @@ pub async fn update_saved_connection(
 
 #[tauri::command]
 pub async fn disconnect(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
-    state.connections.lock().await.remove(&id);
+    state.connections.lock().unwrap().remove(&id);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn list_connections(state: State<'_, Arc<AppState>>) -> Result<Vec<ConnectionSummary>> {
-    let guard = state.connections.lock().await;
-    let mut v: Vec<ConnectionSummary> = guard.values().map(snapshot).collect();
+    // 外层同步锁只借 Arc（快照），立即释放；逐连接加 per-connection 锁再快照（S1，design §4.2）。
+    let entries: Vec<Arc<futures::lock::Mutex<ActiveConnection>>> = {
+        let guard = state.connections.lock().unwrap();
+        guard.values().cloned().collect()
+    };
+    let mut v: Vec<ConnectionSummary> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let active = entry.lock().await;
+        v.push(snapshot(&active));
+    }
     v.sort_by_key(|c| c.id);
     Ok(v)
 }
 
 #[tauri::command]
 pub async fn list_databases(state: State<'_, Arc<AppState>>, id: u64) -> Result<Vec<String>> {
-    let mut guard = state.connections.lock().await;
-    let active = guard
-        .get_mut(&id)
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
     active.conn.schemas(None).await
 }
 
@@ -480,10 +497,14 @@ pub async fn list_tables(
     id: u64,
     database: String,
 ) -> Result<Vec<TableInfo>> {
-    let mut guard = state.connections.lock().await;
-    let active = guard
-        .get_mut(&id)
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
     active.conn.tables(&database).await
 }
 
@@ -494,10 +515,14 @@ pub async fn list_columns(
     database: String,
     table: String,
 ) -> Result<Vec<ColumnInfo>> {
-    let mut guard = state.connections.lock().await;
-    let active = guard
-        .get_mut(&id)
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
     active.conn.columns(&database, &table).await
 }
 
@@ -511,22 +536,23 @@ pub async fn execute_query(
 ) -> Result<QueryOutput> {
     guard_dangerous(&sql, confirmed)?;
     let started = Utc::now();
-    let (project_id, conn_name, result) = {
-        let mut guard = state.connections.lock().await;
-        let active = guard
-            .get_mut(&id)
-            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
-        let project_id = active.project_id.clone();
-        let conn_name = active.name.clone();
-        let result = execute_buffered(
-            active.conn.as_mut(),
-            database.as_deref(),
-            &sql,
-            &ExecOpts::default(),
-        )
-        .await;
-        (project_id, conn_name, result)
-    };
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
+    let project_id = active.project_id.clone();
+    let conn_name = active.name.clone();
+    let result = execute_buffered(
+        active.conn.as_mut(),
+        database.as_deref(),
+        &sql,
+        &ExecOpts::default(),
+    )
+    .await;
 
     let duration_ms = (Utc::now() - started).num_milliseconds().max(0) as u64;
     let mut rec = ExecutionRecord::new(project_id, sql.clone(), SqlOrigin::ManualEditor);
@@ -605,9 +631,14 @@ pub async fn delete_project(
 /// 删除项目（R1，design §4.6）：活跃连接或「已保存连接」（config.connections，非仅活跃）任一存在即
 /// 返回 `DbError::Config` 拒绝（不级联删除，避免误删其它项目在用凭据，#41）。
 async fn delete_project_impl(state: &Arc<AppState>, id: &str) -> Result<()> {
-    {
-        let guard = state.connections.lock().await;
-        if guard.values().any(|c| c.project_id == id) {
+    // 遍历活跃连接：外层同步锁只快照 Arc 列表，逐连接加 per-connection 锁判 project_id（S1，design §4.2）。
+    let entries: Vec<Arc<futures::lock::Mutex<ActiveConnection>>> = {
+        let guard = state.connections.lock().unwrap();
+        guard.values().cloned().collect()
+    };
+    for entry in entries {
+        let active = entry.lock().await;
+        if active.project_id == id {
             return Err(DbError::Config("项目下仍有连接，请先删除连接".to_string()));
         }
     }
@@ -703,28 +734,24 @@ pub async fn execute_query_stream(
 ) -> Result<()> {
     guard_dangerous(&sql, confirmed)?;
     let started = Utc::now();
-    let (project_id, conn_name, result, row_count) = {
-        let mut guard = state.connections.lock().await;
-        let active = guard
-            .get_mut(&id)
-            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
-        let project_id = active.project_id.clone();
-        let conn_name = active.name.clone();
-        let cancel = active.cancel.clone();
-        let opts = ExecOpts {
-            cancel: Some(cancel),
-            ..Default::default()
-        };
-        let mut sink = ChannelSink {
-            channel,
-            rows: 0,
-        };
-        let result = active
-            .conn
-            .execute_stream(database.as_deref(), &sql, &opts, &mut sink)
-            .await;
-        (project_id, conn_name, result, sink.rows as u64)
-    };
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
+    let project_id = active.project_id.clone();
+    let conn_name = active.name.clone();
+    // Task 4 引入查询实例 token 后在此注入 `ExecOpts.cancel`（#23）；当前取消能力由 Task 4 恢复。
+    let opts = ExecOpts::default();
+    let mut sink = ChannelSink { channel, rows: 0 };
+    let result = active
+        .conn
+        .execute_stream(database.as_deref(), &sql, &opts, &mut sink)
+        .await;
+    let row_count = sink.rows as u64;
 
     let duration_ms = (Utc::now() - started).num_milliseconds().max(0) as u64;
     let mut rec = ExecutionRecord::new(project_id, sql.clone(), SqlOrigin::ManualEditor);
@@ -754,9 +781,13 @@ pub async fn execute_query_stream(
 
 #[tauri::command]
 pub async fn cancel_query(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
-    let guard = state.connections.lock().await;
-    if let Some(active) = guard.get(&id) {
-        active.cancel.cancel();
+    // 只读查询实例 token 注册表（不抢连接锁，#21/#23）；Task 4 填充 token，当前为空。
+    let tokens = state.query_tokens.lock().unwrap();
+    let prefix = format!("{id}:");
+    for (k, t) in tokens.iter() {
+        if k.starts_with(&prefix) {
+            t.cancel();
+        }
     }
     Ok(())
 }
@@ -781,37 +812,53 @@ fn guard_dangerous(sql: &str, confirmed: bool) -> Result<()> {
 
 #[tauri::command]
 pub async fn begin(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
-    let mut guard = state.connections.lock().await;
-    let active = guard
-        .get_mut(&id)
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
     active.conn.begin().await
 }
 
 #[tauri::command]
 pub async fn commit(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
-    let mut guard = state.connections.lock().await;
-    let active = guard
-        .get_mut(&id)
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
     active.conn.commit().await
 }
 
 #[tauri::command]
 pub async fn rollback(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
-    let mut guard = state.connections.lock().await;
-    let active = guard
-        .get_mut(&id)
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
     active.conn.rollback().await
 }
 
 #[tauri::command]
 pub async fn set_autocommit(state: State<'_, Arc<AppState>>, id: u64, enabled: bool) -> Result<()> {
-    let mut guard = state.connections.lock().await;
-    let active = guard
-        .get_mut(&id)
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
     active.conn.set_autocommit(enabled).await
 }
 
@@ -840,14 +887,14 @@ pub async fn build_edit_sql(
     pk: Vec<(String, ColumnType, String)>,
     set: Vec<(String, ColumnType, String)>,
 ) -> Result<String> {
-    let driver_id = {
-        let guard = state.connections.lock().await;
-        guard
-            .get(&id)
-            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?
-            .driver_id
-            .clone()
-    };
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let driver_id = entry.lock().await.driver_id.clone();
     let driver = state.registry.resolve(&driver_id)?;
     let pk = parse_cells(&pk)?;
     let set = parse_cells(&set)?;
@@ -868,36 +915,37 @@ pub async fn execute_edit(
     pk: Vec<(String, ColumnType, String)>,
     set: Vec<(String, ColumnType, String)>,
 ) -> Result<QueryOutput> {
-    let driver_id = {
-        let guard = state.connections.lock().await;
-        guard
-            .get(&id)
-            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?
-            .driver_id
-            .clone()
-    };
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let driver_id = entry.lock().await.driver_id.clone();
     let driver = state.registry.resolve(&driver_id)?;
     let pk = parse_cells(&pk)?;
     let set = parse_cells(&set)?;
     let sql = dby_core::edit::build_update(driver.dialect(), &table, &pk, &set);
 
     let started = Utc::now();
-    let (project_id, conn_name, result) = {
-        let mut guard = state.connections.lock().await;
-        let active = guard
-            .get_mut(&id)
-            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
-        let project_id = active.project_id.clone();
-        let conn_name = active.name.clone();
-        let result = execute_buffered(
-            active.conn.as_mut(),
-            database.as_deref(),
-            &sql,
-            &ExecOpts::default(),
-        )
-        .await;
-        (project_id, conn_name, result)
-    };
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
+    let project_id = active.project_id.clone();
+    let conn_name = active.name.clone();
+    let result = execute_buffered(
+        active.conn.as_mut(),
+        database.as_deref(),
+        &sql,
+        &ExecOpts::default(),
+    )
+    .await;
 
     let duration_ms = (Utc::now() - started).num_milliseconds().max(0) as u64;
     let mut rec = ExecutionRecord::new(project_id, sql, SqlOrigin::DataEdit);
@@ -928,14 +976,14 @@ pub async fn execute_edit(
 // ---------- DDL（Schema 管理） ----------
 
 async fn driver_for(state: &Arc<AppState>, id: u64) -> Result<Arc<dyn Driver>> {
-    let driver_id = {
-        let guard = state.connections.lock().await;
-        guard
-            .get(&id)
-            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?
-            .driver_id
-            .clone()
-    };
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let driver_id = entry.lock().await.driver_id.clone();
     state.registry.resolve(&driver_id)
 }
 
@@ -946,22 +994,23 @@ async fn run_ddl(
     sql: String,
 ) -> Result<QueryOutput> {
     let started = Utc::now();
-    let (project_id, conn_name, result) = {
-        let mut guard = state.connections.lock().await;
-        let active = guard
-            .get_mut(&id)
-            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
-        let project_id = active.project_id.clone();
-        let conn_name = active.name.clone();
-        let result = execute_buffered(
-            active.conn.as_mut(),
-            database.as_deref(),
-            &sql,
-            &ExecOpts::default(),
-        )
-        .await;
-        (project_id, conn_name, result)
-    };
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
+    let project_id = active.project_id.clone();
+    let conn_name = active.name.clone();
+    let result = execute_buffered(
+        active.conn.as_mut(),
+        database.as_deref(),
+        &sql,
+        &ExecOpts::default(),
+    )
+    .await;
 
     let duration_ms = (Utc::now() - started).num_milliseconds().max(0) as u64;
     let mut rec = ExecutionRecord::new(project_id, sql, SqlOrigin::SchemaEdit);
@@ -1068,23 +1117,24 @@ pub async fn export_result(
 ) -> Result<String> {
     guard_dangerous(&sql, confirmed)?;
     let started = Utc::now();
-    let (project_id, conn_name, driver_id, output) = {
-        let mut guard = state.connections.lock().await;
-        let active = guard
-            .get_mut(&id)
-            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
-        let project_id = active.project_id.clone();
-        let conn_name = active.name.clone();
-        let driver_id = active.driver_id.clone();
-        let output = execute_buffered(
-            active.conn.as_mut(),
-            database.as_deref(),
-            &sql,
-            &ExecOpts::default(),
-        )
-        .await;
-        (project_id, conn_name, driver_id, output)
-    };
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
+    let project_id = active.project_id.clone();
+    let conn_name = active.name.clone();
+    let driver_id = active.driver_id.clone();
+    let output = execute_buffered(
+        active.conn.as_mut(),
+        database.as_deref(),
+        &sql,
+        &ExecOpts::default(),
+    )
+    .await;
 
     // 记录历史（origin=export）
     let duration_ms = (Utc::now() - started).num_milliseconds().max(0) as u64;
@@ -1229,7 +1279,7 @@ mod tests {
             "save=false 不得写入 config"
         );
         assert!(
-            state.connections.lock().await.is_empty(),
+            state.connections.lock().unwrap().is_empty(),
             "save=false 不得产生活跃连接残留"
         );
     }

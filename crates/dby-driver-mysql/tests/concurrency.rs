@@ -1,10 +1,13 @@
-//! #21 并发回归测试：慢查询不得串行化其他连接。
+//! 驱动层冒烟测试：两条独立的 `MysqlDriver` 连接互不阻塞。
 //!
-//! 历史缺陷 #21：全局锁把**所有**连接串行化 —— 连接 A 的长查询进行期间，
-//! 连接 B 的任何操作都要排队等 A 结束。修复方案 S1：改为每连接独立锁
-//! （连接 A 的慢查询不再阻塞连接 B）。
+//! 说明（评审后重定性）：本测试位于驱动 crate，只验证「驱动层两个独立的
+//! `MysqlConnection` 无共享锁、天然并发、互不阻塞」——这是驱动 API 的冒烟测试，
+//! 修复前/后都会通过，**不验证** #21 的壳层每连接锁（S1）。S1 锁在壳层
+//! `src-tauri/src/state.rs` + `commands.rs`，由 src-tauri 层验证（已记录为
+//! deferred：需 src-tauri harness，超出 plan 范围；S1 锁已在 T2+T3 评审中
+//! 逐处静态核实）。
 //!
-//! 本测试验证：连接 A 上 `SELECT SLEEP(30)` 的同时，连接 B 的
+//! 本测试：连接 A 上 `SELECT SLEEP(30)` 的同时，连接 B 的
 //! `schemas()`（SHOW DATABASES，即 list_databases）必须在 <2s 内返回。
 //!
 //! 需要真实 MySQL，默认 `#[ignore]` 跳过；运行方式同其他集成测试：
@@ -33,7 +36,9 @@ fn params() -> ConnectParams {
     }
 }
 
-/// 回归 #21：连接 A 的慢查询不得阻塞连接 B（每连接独立锁，S1）。
+/// 驱动层冒烟：两条独立 `MysqlDriver` 连接（各自独立的 `MysqlConnection`，
+/// 驱动层无共享锁）并发运行 —— A 的 `SELECT SLEEP(30)` 不阻塞 B 的
+/// `schemas()`（<2s 返回）。壳层每连接锁（S1，#21）不在本 crate 验证。
 ///
 /// 环境守卫：`DBY_TEST_MYSQL_HOST/PORT/PASSWORD` 全未设置时跳过
 /// （CI 无 MySQL；`--ignored` 手动运行未配置环境也不误连默认值）。
@@ -41,7 +46,7 @@ fn params() -> ConnectParams {
 /// 唯一硬断言是 B 的返回耗时 <2s（A 的慢查询进行中）。
 #[tokio::test]
 #[ignore = "requires MySQL; see deploy/database/README.md"]
-async fn slow_query_does_not_block_other_connection() {
+async fn two_driver_connections_run_concurrently() {
     if std::env::var("DBY_TEST_MYSQL_HOST").is_err()
         && std::env::var("DBY_TEST_MYSQL_PORT").is_err()
         && std::env::var("DBY_TEST_MYSQL_PASSWORD").is_err()
@@ -80,7 +85,7 @@ async fn slow_query_does_not_block_other_connection() {
     let elapsed = started.elapsed();
     assert!(
         elapsed < Duration::from_secs(2),
-        "connection B was blocked by connection A's slow query ({elapsed:?}): per-connection locks (#21) broken"
+        "connection B was blocked by connection A's slow query ({elapsed:?}): two driver connections must not serialize each other"
     );
     eprintln!(
         "connection B listed {} database(s) in {elapsed:?} while A ran SELECT SLEEP(30)",

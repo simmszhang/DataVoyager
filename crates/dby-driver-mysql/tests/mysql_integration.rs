@@ -419,3 +419,128 @@ async fn metadata_and_query_result_type_names_agree() {
     .await
     .unwrap();
 }
+
+/// #34：DML 取消必须与 SELECT 一样走外层 `select!`（秒断 #5）—— 长 UPDATE 取消返回
+/// `Cancelled` 且 <2s（非 drain 排空）；非取消路径的 INSERT 仍保留 `last_insert_id`
+/// （防 `query_drop` 回归：`query_drop` 不提供 affected_rows/last_insert_id）。
+///
+/// 环境守卫：未设置 `DBY_TEST_MYSQL_*` 时跳过（CI 无 MySQL；`--ignored` 手动运行时
+/// 未配置环境也不误连默认值）。
+#[tokio::test]
+#[ignore = "requires MySQL; see deploy/database/README.md"]
+async fn dml_can_be_cancelled_and_last_insert_id_kept() {
+    if std::env::var("DBY_TEST_MYSQL_HOST").is_err()
+        && std::env::var("DBY_TEST_MYSQL_PORT").is_err()
+        && std::env::var("DBY_TEST_MYSQL_PASSWORD").is_err()
+    {
+        eprintln!("skip: DBY_TEST_MYSQL_* 未设置（无真实 MySQL）");
+        return;
+    }
+
+    let driver = MysqlDriver;
+    let mut conn = driver.connect(&params()).await.expect("connect failed");
+
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "DROP TABLE IF EXISTS dby_dml_cancel",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "CREATE TABLE dby_dml_cancel (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(64))",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "INSERT INTO dby_dml_cancel (name) VALUES ('seed')",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+
+    // 长 UPDATE（每行 SLEEP(60)）：100ms 后取消 → Cancelled（DML 与 SELECT 同走外层 select!）。
+    let cancel = CancellationToken::new();
+    let cancel_clone = cancel.clone();
+    let opts = ExecOpts {
+        cancel: Some(cancel_clone),
+        ..Default::default()
+    };
+    let canceller = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        cancel.cancel();
+    });
+    let started = std::time::Instant::now();
+    let mut sink = CountingSink { rows: 0 };
+    let res = conn
+        .execute_stream(
+            Some("dby_test"),
+            "UPDATE dby_dml_cancel SET name = SLEEP(60) WHERE id = 1",
+            &opts,
+            &mut sink,
+        )
+        .await;
+    let elapsed = started.elapsed();
+    canceller.await.unwrap();
+    assert!(
+        matches!(res, Err(DbError::Cancelled)),
+        "expected DML cancellation, got {res:?}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "DML cancel must be prompt (<2s, sec-break not drain), took {elapsed:?}"
+    );
+    // #5 秒断：取消即关 socket，连接毒化。
+    assert!(
+        matches!(conn.ping().await, Err(DbError::ConnectionNotFound(_))),
+        "cancel must poison the connection"
+    );
+
+    // 非取消路径：INSERT 的 last_insert_id 必须保留（query_iter 而非 query_drop）。
+    let mut conn2 = driver.connect(&params()).await.expect("reconnect failed");
+    let mut sink2 = CollectingSink::new(None);
+    conn2
+        .execute_stream(
+            Some("dby_test"),
+            "INSERT INTO dby_dml_cancel (name) VALUES ('after-cancel')",
+            &ExecOpts::default(),
+            &mut sink2,
+        )
+        .await
+        .unwrap();
+    let out = sink2.into_output();
+    assert_eq!(out.affected_rows, 1);
+    let lid = out
+        .last_insert_id
+        .expect("last_insert_id must be present on non-cancelled INSERT");
+    // 返回值必须真的标识该行（若回归 query_drop，last_insert_id 为 None，此断言即失败）。
+    let mut check = CollectingSink::new(None);
+    conn2
+        .execute_stream(
+            Some("dby_test"),
+            "SELECT id FROM dby_dml_cancel WHERE name = 'after-cancel'",
+            &ExecOpts::default(),
+            &mut check,
+        )
+        .await
+        .unwrap();
+    let check_out = check.into_output();
+    let rs = check_out.first_result_set().expect("result set");
+    assert_eq!(rs.rows.len(), 1);
+    assert_eq!(rs.rows[0][0].to_display_string(), lid.to_string());
+
+    execute_buffered(
+        conn2.as_mut(),
+        Some("dby_test"),
+        "DROP TABLE dby_dml_cancel",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+}

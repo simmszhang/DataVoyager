@@ -85,14 +85,24 @@ impl QueryOutput {
     }
 }
 
-/// 流式执行事件（SELECT 吐 Columns + Rows 批次；DML 吐 Affected）。
+/// 流式执行事件（SELECT 吐 Columns + Rows 批次；DML 吐 Affected；多结果集边界/终止事件见 #28）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "snake_case")]
 pub enum StreamEvent {
     Columns(Vec<ColumnInfo>),
     Rows(Vec<Vec<Value>>),
-    Affected { affected_rows: u64, last_insert_id: Option<u64> },
+    Affected {
+        affected_rows: u64,
+        last_insert_id: Option<u64>,
+    },
     Info(Option<String>),
+    ResultSetEnd, // 结果集边界
+    Truncated,    // 超 max_rows 截断（协议预留，流式截断发射归 #35/#27）
+    Done,         // 命令成功收尾（unit 变体：序列化为 {"event":"done"}，无 data）
+    Error {
+        kind: String,
+        message: String,
+    }, // 命令失败收尾（携带 kind，对齐 S5）
 }
 
 /// 结果接收器：驱动把流式事件推给实现者（如 Tauri Channel 或缓冲收集器）。
@@ -206,6 +216,9 @@ impl ResultSink for CollectingSink {
                 self.last_insert_id = last_insert_id;
             }
             StreamEvent::Info(info) => self.info = info,
+            // 边界/终止事件：Task 2（#28）按 design §4.2 分桶结算，此处暂不消费。
+            StreamEvent::ResultSetEnd | StreamEvent::Truncated | StreamEvent::Done => {}
+            StreamEvent::Error { .. } => {}
         }
     }
 }
@@ -275,5 +288,24 @@ mod tests {
         let ev = StreamEvent::Rows(vec![vec![Value::I64(1)]]);
         let json = serde_json::to_value(&ev).unwrap();
         assert_eq!(json["event"], serde_json::json!("rows"));
+    }
+
+    #[test]
+    fn result_set_end_and_done_serialize() {
+        assert_eq!(
+            serde_json::to_value(StreamEvent::ResultSetEnd).unwrap()["event"],
+            "result_set_end"
+        );
+        assert_eq!(
+            serde_json::to_value(StreamEvent::Done).unwrap()["event"],
+            "done" // unit 变体无 data
+        );
+        let err = StreamEvent::Error {
+            kind: "cancelled".into(),
+            message: "x".into(),
+        };
+        let json = serde_json::to_value(err).unwrap();
+        assert_eq!(json["data"]["message"], "x");
+        assert_eq!(json["data"]["kind"], "cancelled");
     }
 }

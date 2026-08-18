@@ -50,7 +50,8 @@ pub fn to_json(rs: &ResultSet) -> String {
             serde_json::Value::Object(obj)
         })
         .collect();
-    serde_json::to_string_pretty(&serde_json::Value::Array(arr)).unwrap_or_else(|_| "[]".to_string())
+    serde_json::to_string_pretty(&serde_json::Value::Array(arr))
+        .unwrap_or_else(|_| "[]".to_string())
 }
 
 /// Markdown 表格。
@@ -69,7 +70,10 @@ pub fn to_markdown(rs: &ResultSet) -> String {
     for row in &rs.rows {
         out.push('|');
         for v in row {
-            let s = v.to_display_string().replace('|', "\\|").replace('\n', "<br>");
+            let s = v
+                .to_display_string()
+                .replace('|', "\\|")
+                .replace('\n', "<br>");
             out.push_str(&format!(" {s} |"));
         }
         out.push('\n');

@@ -34,7 +34,11 @@ pub struct ConnectionConfig {
 }
 
 impl ConnectionConfig {
-    pub fn new(project_id: impl Into<String>, name: impl Into<String>, driver: impl Into<String>) -> Self {
+    pub fn new(
+        project_id: impl Into<String>,
+        name: impl Into<String>,
+        driver: impl Into<String>,
+    ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             project_id: project_id.into(),

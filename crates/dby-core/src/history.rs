@@ -250,17 +250,20 @@ impl HistoryStore {
         args.push(Box::new(filter.limit as i64));
 
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())), |r| {
-            Ok(StatementHit {
-                hash: r.get(0)?,
-                sql: r.get(1)?,
-                project_id: r.get(2)?,
-                run_count: r.get::<_, i64>(3)? as u64,
-                last_run_at: parse_rfc3339(&r.get::<_, String>(4)?),
-                pinned: r.get::<_, i64>(5)? != 0,
-                tags: parse_tags(&r.get::<_, String>(6)?),
-            })
-        })?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())),
+            |r| {
+                Ok(StatementHit {
+                    hash: r.get(0)?,
+                    sql: r.get(1)?,
+                    project_id: r.get(2)?,
+                    run_count: r.get::<_, i64>(3)? as u64,
+                    last_run_at: parse_rfc3339(&r.get::<_, String>(4)?),
+                    pinned: r.get::<_, i64>(5)? != 0,
+                    tags: parse_tags(&r.get::<_, String>(6)?),
+                })
+            },
+        )?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(DbError::from)
     }
@@ -286,17 +289,20 @@ impl HistoryStore {
         args.push(Box::new(filter.limit as i64));
 
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())), |r| {
-            Ok(StatementHit {
-                hash: r.get(0)?,
-                sql: r.get(1)?,
-                project_id: r.get(2)?,
-                run_count: r.get::<_, i64>(3)? as u64,
-                last_run_at: parse_rfc3339(&r.get::<_, String>(4)?),
-                pinned: r.get::<_, i64>(5)? != 0,
-                tags: parse_tags(&r.get::<_, String>(6)?),
-            })
-        })?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())),
+            |r| {
+                Ok(StatementHit {
+                    hash: r.get(0)?,
+                    sql: r.get(1)?,
+                    project_id: r.get(2)?,
+                    run_count: r.get::<_, i64>(3)? as u64,
+                    last_run_at: parse_rfc3339(&r.get::<_, String>(4)?),
+                    pinned: r.get::<_, i64>(5)? != 0,
+                    tags: parse_tags(&r.get::<_, String>(6)?),
+                })
+            },
+        )?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(DbError::from)
     }
@@ -314,22 +320,25 @@ impl HistoryStore {
         args.push(Box::new(filter.limit as i64));
 
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())), |r| {
-            Ok(ExecutionRecord {
-                id: r.get(0)?,
-                project_id: r.get(1)?,
-                connection_id: r.get(2)?,
-                connection_name: r.get(3)?,
-                database: r.get(4)?,
-                sql: r.get(5)?,
-                origin: SqlOrigin::parse(&r.get::<_, String>(6)?),
-                status: r.get(7)?,
-                rows_affected: r.get::<_, i64>(8)? as u64,
-                row_count: r.get::<_, Option<i64>>(9)?.map(|v| v as u64),
-                duration_ms: r.get::<_, i64>(10)? as u64,
-                started_at: parse_rfc3339(&r.get::<_, String>(11)?),
-            })
-        })?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())),
+            |r| {
+                Ok(ExecutionRecord {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    connection_id: r.get(2)?,
+                    connection_name: r.get(3)?,
+                    database: r.get(4)?,
+                    sql: r.get(5)?,
+                    origin: SqlOrigin::parse(&r.get::<_, String>(6)?),
+                    status: r.get(7)?,
+                    rows_affected: r.get::<_, i64>(8)? as u64,
+                    row_count: r.get::<_, Option<i64>>(9)?.map(|v| v as u64),
+                    duration_ms: r.get::<_, i64>(10)? as u64,
+                    started_at: parse_rfc3339(&r.get::<_, String>(11)?),
+                })
+            },
+        )?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(DbError::from)
     }

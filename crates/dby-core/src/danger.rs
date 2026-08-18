@@ -167,7 +167,10 @@ mod tests {
 
     #[test]
     fn delete_update_with_where_is_safe() {
-        assert_eq!(analyze_danger("DELETE FROM users WHERE id = 1"), DangerLevel::Safe);
+        assert_eq!(
+            analyze_danger("DELETE FROM users WHERE id = 1"),
+            DangerLevel::Safe
+        );
         assert_eq!(
             analyze_danger("UPDATE users SET x = 1 WHERE id = 1"),
             DangerLevel::Safe

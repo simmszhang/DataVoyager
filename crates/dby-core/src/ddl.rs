@@ -42,7 +42,11 @@ pub fn build_create_table(dialect: &dyn Dialect, table: &str, columns: &[ColumnD
         })
         .collect::<Vec<_>>()
         .join(", ");
-    format!("CREATE TABLE {} ({});", dialect.quote_identifier(table), defs)
+    format!(
+        "CREATE TABLE {} ({});",
+        dialect.quote_identifier(table),
+        defs
+    )
 }
 
 pub fn build_rename_table(dialect: &dyn Dialect, old_name: &str, new_name: &str) -> String {

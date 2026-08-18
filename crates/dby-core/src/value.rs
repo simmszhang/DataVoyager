@@ -3,10 +3,9 @@
 //! 跨驱动、跨进程（前后端）无损表示一个单元格值：用带类型标签的 JSON
 //! envelope 序列化（`{"t": "...", "v": ...}`），前端据此着色/格式化/选编辑控件。
 
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeMap;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "t", content = "v", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Null,
     Bool(bool),
@@ -29,6 +28,163 @@ pub enum Value {
     Uuid(String),
     Array(Vec<Value>),
     Map(Vec<(String, Value)>),
+}
+
+// 手写 serde：`I64/U64` 的 `v` 用十进制字符串承载（JSON number 超过 2^53 会丢精度），
+// 其余变体保持 `{"t": ..., "v": ...}` envelope 语义不变。反序列化时 `i64/u64` 同时接受
+// 字符串与旧 number（迁移过渡，见 design §4.1）。
+impl serde::Serialize for Value {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(2))?;
+        match self {
+            Value::Null => {
+                map.serialize_entry("t", "null")?;
+            }
+            Value::Bool(b) => {
+                map.serialize_entry("t", "bool")?;
+                map.serialize_entry("v", b)?;
+            }
+            Value::I64(i) => {
+                map.serialize_entry("t", "i64")?;
+                map.serialize_entry("v", &i.to_string())?;
+            }
+            Value::U64(u) => {
+                map.serialize_entry("t", "u64")?;
+                map.serialize_entry("v", &u.to_string())?;
+            }
+            Value::F64(f) => {
+                map.serialize_entry("t", "f64")?;
+                map.serialize_entry("v", f)?;
+            }
+            Value::Decimal(s)
+            | Value::Str(s)
+            | Value::Date(s)
+            | Value::Time(s)
+            | Value::DateTime(s)
+            | Value::Uuid(s) => {
+                map.serialize_entry("t", self.kind())?;
+                map.serialize_entry("v", s)?;
+            }
+            Value::Bytes(b) => {
+                map.serialize_entry("t", "bytes")?;
+                map.serialize_entry("v", b)?;
+            }
+            Value::Json(j) => {
+                map.serialize_entry("t", "json")?;
+                map.serialize_entry("v", j)?;
+            }
+            Value::Array(a) => {
+                map.serialize_entry("t", "array")?;
+                map.serialize_entry("v", a)?;
+            }
+            Value::Map(m) => {
+                map.serialize_entry("t", "map")?;
+                map.serialize_entry("v", m)?;
+            }
+        }
+        map.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct ValueVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ValueVisitor {
+            type Value = Value;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "a tagged value envelope")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut tag: Option<String> = None;
+                let mut content: Option<serde_json::Value> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "t" => tag = Some(map.next_value()?),
+                        "v" => content = Some(map.next_value()?),
+                        _ => {
+                            let _: serde::de::IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+                let tag = tag.ok_or_else(|| serde::de::Error::missing_field("t"))?;
+                let content = content.unwrap_or(serde_json::Value::Null);
+                Ok(match tag.as_str() {
+                    "null" => Value::Null,
+                    "bool" => Value::Bool(
+                        serde_json::from_value(content).map_err(serde::de::Error::custom)?,
+                    ),
+                    "i64" => Value::I64(int_content(content, "i64")?),
+                    "u64" => Value::U64(uint_content(content, "u64")?),
+                    "f64" => Value::F64(
+                        serde_json::from_value(content).map_err(serde::de::Error::custom)?,
+                    ),
+                    "decimal" => Value::Decimal(string_content(content, "decimal")?),
+                    "str" => Value::Str(string_content(content, "str")?),
+                    "bytes" => Value::Bytes(
+                        serde_json::from_value(content).map_err(serde::de::Error::custom)?,
+                    ),
+                    "date" => Value::Date(string_content(content, "date")?),
+                    "time" => Value::Time(string_content(content, "time")?),
+                    "datetime" => Value::DateTime(string_content(content, "datetime")?),
+                    "json" => Value::Json(content),
+                    "uuid" => Value::Uuid(string_content(content, "uuid")?),
+                    "array" => Value::Array(
+                        serde_json::from_value(content).map_err(serde::de::Error::custom)?,
+                    ),
+                    "map" => Value::Map(
+                        serde_json::from_value(content).map_err(serde::de::Error::custom)?,
+                    ),
+                    _ => return Err(serde::de::Error::custom("unknown value tag")),
+                })
+            }
+        }
+
+        deserializer.deserialize_map(ValueVisitor)
+    }
+}
+
+/// `v` 必须是 JSON 字符串（`i64/u64` 新格式）。
+fn string_content<E: serde::de::Error>(
+    v: serde_json::Value,
+    tag: &'static str,
+) -> Result<String, E> {
+    match v {
+        serde_json::Value::String(s) => Ok(s),
+        _ => Err(E::custom(format!("{tag} v must be a string"))),
+    }
+}
+
+/// `i64` 的 `v` 接受字符串（新格式）或旧 number（迁移过渡），并校验范围。
+fn int_content<E: serde::de::Error>(v: serde_json::Value, tag: &'static str) -> Result<i64, E> {
+    match v {
+        serde_json::Value::String(s) => s.parse().map_err(serde::de::Error::custom),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .ok_or_else(|| E::custom(format!("{tag} out of range"))),
+        _ => Err(E::custom(format!("{tag} v must be a string or number"))),
+    }
+}
+
+fn uint_content<E: serde::de::Error>(v: serde_json::Value, tag: &'static str) -> Result<u64, E> {
+    match v {
+        serde_json::Value::String(s) => s.parse().map_err(serde::de::Error::custom),
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .ok_or_else(|| E::custom(format!("{tag} out of range"))),
+        _ => Err(E::custom(format!("{tag} v must be a string or number"))),
+    }
 }
 
 impl Value {
@@ -68,7 +224,10 @@ impl Value {
             | Value::DateTime(s)
             | Value::Uuid(s) => s.clone(),
             Value::Bytes(b) => {
-                format!("0x{}", b.iter().map(|x| format!("{x:02x}")).collect::<String>())
+                format!(
+                    "0x{}",
+                    b.iter().map(|x| format!("{x:02x}")).collect::<String>()
+                )
             }
             Value::Json(j) => j.to_string(),
             Value::Array(arr) => format!(
@@ -143,11 +302,36 @@ mod tests {
     fn serializes_as_tagged_envelope() {
         let v = Value::I64(42);
         let json = serde_json::to_value(&v).unwrap();
-        assert_eq!(json, serde_json::json!({"t": "i64", "v": 42}));
+        assert_eq!(json, serde_json::json!({"t": "i64", "v": "42"}));
 
         let v = Value::Null;
         let json = serde_json::to_value(&v).unwrap();
         assert_eq!(json, serde_json::json!({"t": "null"}));
+    }
+
+    #[test]
+    fn i64_serializes_as_string() {
+        assert_eq!(
+            serde_json::to_value(Value::I64(9223372036854775807)).unwrap(),
+            serde_json::json!({"t": "i64", "v": "9223372036854775807"})
+        );
+        let back: Value =
+            serde_json::from_str("{\"t\":\"i64\",\"v\":\"9223372036854775807\"}").unwrap();
+        assert_eq!(back, Value::I64(9223372036854775807));
+        let u = Value::U64(18446744073709551615);
+        assert_eq!(
+            serde_json::to_value(&u).unwrap(),
+            serde_json::json!({"t": "u64", "v": "18446744073709551615"})
+        );
+    }
+
+    #[test]
+    fn i64_deserializes_legacy_number() {
+        // 迁移过渡：旧 IPC 负载中 i64/u64 的 v 是 JSON number，必须仍能反序列化。
+        let back: Value = serde_json::from_str("{\"t\":\"i64\",\"v\":42}").unwrap();
+        assert_eq!(back, Value::I64(42));
+        let back: Value = serde_json::from_str("{\"t\":\"u64\",\"v\":7}").unwrap();
+        assert_eq!(back, Value::U64(7));
     }
 
     #[test]

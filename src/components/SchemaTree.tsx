@@ -15,9 +15,20 @@ interface Props {
   onOpenTable: (connId: number, database: string, table: string) => void;
 }
 
-const connKey = (id: number) => `c:${id}`;
-const dbKey = (id: number, db: string) => `d:${id}:${db}`;
-const tblKey = (id: number, db: string, t: string) => `t:${id}:${db}:${t}`;
+/// 结构化节点 key：JSON 编码，避免 `:` 拼接/切分在库表名含分隔符时失效（defect #3）。
+type NodeKey =
+  | { kind: "conn"; connId: number }
+  | { kind: "db"; connId: number; db: string }
+  | { kind: "table"; connId: number; db: string; table: string }
+  | { kind: "column"; connId: number; db: string; table: string; column: string };
+
+const keyOf = (k: NodeKey): string => JSON.stringify(k);
+const parseKey = (key: string): NodeKey => JSON.parse(key);
+
+const connKey = (id: number) => keyOf({ kind: "conn", connId: id });
+const dbKey = (id: number, db: string) => keyOf({ kind: "db", connId: id, db });
+const tblKey = (id: number, db: string, t: string) =>
+  keyOf({ kind: "table", connId: id, db, table: t });
 
 export default function SchemaTree({
   connections,
@@ -35,22 +46,16 @@ export default function SchemaTree({
   const [status, setStatus] = useState<string | null>(null);
 
   async function loadChildren(key: string) {
-    const [kind, ...rest] = key.split(":");
+    const node = parseKey(key);
     try {
-      if (kind === "c") {
-        const connId = Number(rest[0]);
-        const list = await api.listDatabases(connId);
+      if (node.kind === "conn") {
+        const list = await api.listDatabases(node.connId);
         setDbs((p) => ({ ...p, [key]: list }));
-      } else if (kind === "d") {
-        const connId = Number(rest[0]);
-        const db = rest.slice(1).join(":");
-        const list = await api.listTables(connId, db);
+      } else if (node.kind === "db") {
+        const list = await api.listTables(node.connId, node.db);
         setTables((p) => ({ ...p, [key]: list }));
-      } else if (kind === "t") {
-        const connId = Number(rest[0]);
-        const db = rest[1];
-        const t = rest.slice(2).join(":");
-        const list = await api.listColumns(connId, db, t);
+      } else if (node.kind === "table") {
+        const list = await api.listColumns(node.connId, node.db, node.table);
         setColumns((p) => ({ ...p, [key]: list }));
       }
     } catch (e) {
@@ -162,7 +167,11 @@ export default function SchemaTree({
             if (tExpanded) {
               for (const col of columns[tk] ?? []) {
                 nodes.push(
-                  <div key={`${tk}.${col.name}`} className="tree-node leaf" style={{ paddingLeft: 58 }}>
+                  <div
+                    key={keyOf({ kind: "column", connId: c.id, db, table: t.name, column: col.name })}
+                    className="tree-node leaf"
+                    style={{ paddingLeft: 58 }}
+                  >
                     <span className="tree-icon">·</span>
                     <span className="tree-label ellipsis">{col.name}</span>
                     <span className="tree-col-type">{col.type_name}</span>

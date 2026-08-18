@@ -15,6 +15,7 @@ use dby_core::project::Project;
 use dby_core::query::{ExecOpts, QueryOutput, ResultSink, SqlOrigin, StreamEvent};
 use tauri::ipc::Channel;
 
+use crate::secrets::{delete_secret, get_secret, set_secret};
 use crate::state::{ActiveConnection, AppState};
 
 #[derive(Serialize)]
@@ -164,27 +165,6 @@ fn auto_name(params: &ConnectParams) -> String {
             format!("/{database}")
         }
     )
-}
-
-fn set_secret(key: &str, value: &str) -> Result<()> {
-    keyring::Entry::new("dby", key)
-        .map_err(|e| DbError::Other(format!("keychain error: {e}")))?
-        .set_password(value)
-        .map_err(|e| DbError::Other(format!("keychain error: {e}")))
-}
-
-fn get_secret(key: &str) -> Result<String> {
-    keyring::Entry::new("dby", key)
-        .map_err(|e| DbError::Other(format!("keychain error: {e}")))?
-        .get_password()
-        .map_err(|e| DbError::Other(format!("keychain error: {e}")))
-}
-
-fn delete_secret(key: &str) -> Result<()> {
-    keyring::Entry::new("dby", key)
-        .map_err(|e| DbError::Other(format!("keychain error: {e}")))?
-        .delete_credential()
-        .map_err(|e| DbError::Other(format!("keychain error: {e}")))
 }
 
 #[tauri::command]

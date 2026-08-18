@@ -1,4 +1,5 @@
 mod commands;
+mod secrets;
 mod state;
 
 use std::sync::Arc;

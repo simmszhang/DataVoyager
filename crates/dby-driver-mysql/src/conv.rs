@@ -158,10 +158,18 @@ pub fn from_mysql_column(c: &mysql_async::Column) -> ColumnType {
         | MCT::MYSQL_TYPE_STRING
         | MCT::MYSQL_TYPE_ENUM
         | MCT::MYSQL_TYPE_SET => ColumnTypeBase::Str,
+        // TEXT/TINYTEXT/MEDIUMTEXT/LONGTEXT 以 MYSQL_TYPE_BLOB + 真实 charset（≠63）发送；
+        // 只有二进制 BLOB 的 charset 才是 63（binary）——按 charset 区分 Str/Bytes（评审 Important）
         MCT::MYSQL_TYPE_TINY_BLOB
         | MCT::MYSQL_TYPE_MEDIUM_BLOB
         | MCT::MYSQL_TYPE_LONG_BLOB
-        | MCT::MYSQL_TYPE_BLOB => ColumnTypeBase::Bytes,
+        | MCT::MYSQL_TYPE_BLOB => {
+            if c.character_set() == 63 {
+                ColumnTypeBase::Bytes
+            } else {
+                ColumnTypeBase::Str
+            }
+        }
         MCT::MYSQL_TYPE_JSON => ColumnTypeBase::Json,
         MCT::MYSQL_TYPE_DATE | MCT::MYSQL_TYPE_NEWDATE => ColumnTypeBase::Date,
         MCT::MYSQL_TYPE_TIME => ColumnTypeBase::Time,
@@ -169,6 +177,8 @@ pub fn from_mysql_column(c: &mysql_async::Column) -> ColumnType {
         MCT::MYSQL_TYPE_BIT => ColumnTypeBase::Bytes, // BIT(n) 位掩码
         MCT::MYSQL_TYPE_FLOAT => ColumnTypeBase::F32,
         MCT::MYSQL_TYPE_DOUBLE => ColumnTypeBase::F64,
+        // spatial：与元数据路径 parse_column_type("geometry")→Bytes 一致（评审 Minor）
+        MCT::MYSQL_TYPE_GEOMETRY => ColumnTypeBase::Bytes,
         _ => ColumnTypeBase::Unknown,
     };
     // BINARY/VARBINARY：文本协议下 column_type 为 STRING/VAR_STRING 且 charset=63（二进制）
@@ -550,7 +560,8 @@ mod tests {
     }
 
     #[test]
-    fn blob_family_maps_to_bytes() {
+    fn blob_family_with_binary_charset_is_bytes() {
+        // 二进制 BLOB：MYSQL_TYPE_BLOB + charset=63（binary）→ Bytes
         for ty in [
             MCT::MYSQL_TYPE_TINY_BLOB,
             MCT::MYSQL_TYPE_MEDIUM_BLOB,
@@ -558,8 +569,26 @@ mod tests {
             MCT::MYSQL_TYPE_BLOB,
         ] {
             assert_eq!(
-                from_mysql_column(&col(ty)).base,
+                from_mysql_column(&col(ty).with_character_set(63)).base,
                 ColumnTypeBase::Bytes,
+                "{ty:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn blob_family_with_text_charset_is_str() {
+        // 评审 Important：#33 查询路径 TEXT 误判 Bytes——TEXT 以 BLOB + 真实 charset（≠63）发送，
+        // 只有二进制 BLOB 的 charset 才是 63，故 charset≠63 的 BLOB 族应判 Str（与元数据路径一致）
+        for ty in [
+            MCT::MYSQL_TYPE_TINY_BLOB,
+            MCT::MYSQL_TYPE_MEDIUM_BLOB,
+            MCT::MYSQL_TYPE_LONG_BLOB,
+            MCT::MYSQL_TYPE_BLOB,
+        ] {
+            assert_eq!(
+                from_mysql_column(&col(ty).with_character_set(45)).base,
+                ColumnTypeBase::Str,
                 "{ty:?}"
             );
         }
@@ -622,9 +651,18 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_enum_falls_back_to_unknown() {
+    fn geometry_maps_to_bytes() {
+        // 评审 Minor：spatial 与元数据路径 parse_column_type("geometry")→Bytes 对齐
         assert_eq!(
             from_mysql_column(&col(MCT::MYSQL_TYPE_GEOMETRY)).base,
+            ColumnTypeBase::Bytes
+        );
+    }
+
+    #[test]
+    fn unsupported_enum_falls_back_to_unknown() {
+        assert_eq!(
+            from_mysql_column(&col(MCT::MYSQL_TYPE_NULL)).base,
             ColumnTypeBase::Unknown
         );
     }

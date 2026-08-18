@@ -9,6 +9,15 @@ fn ssh_err(e: russh::Error) -> DbError {
     DbError::Other(e.to_string())
 }
 
+/// SSH kex（`connect`）阶段超时阈值：设计定死恰好 10 秒。
+///
+/// `russh::client::Config` 无 `connection_timeout` 字段，超时只能靠
+/// `tokio::time::timeout` 包裹 `connect` 实现。认证（`authenticate_*`）阶段
+/// 超时不在此函数覆盖范围（design §4.6 注，归后续项）。
+fn ssh_connect_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(10)
+}
+
 /// 计算 SSH 主机公钥的 OpenSSH 风格 SHA-256 指纹（`SHA256:<无 padding base64>`）。
 ///
 /// `ClientHandler`/`ProbeHandler` 在 `check_server_key` 中调用本函数完成 TOFU 比对。
@@ -118,9 +127,14 @@ pub async fn start_tunnel(
         expected: ssh.host_key_fingerprint.clone(),
         observed: Arc::new(Mutex::new(None)),
     };
-    let mut handle = russh::client::connect(config, (ssh.host.clone(), ssh.port), handler)
-        .await
-        .map_err(ssh_err)?;
+    // 仅包裹 kex（connect）阶段；认证（authenticate_*）阶段超时归后续项（design §4.6 注）。
+    let mut handle = tokio::time::timeout(
+        ssh_connect_timeout(),
+        russh::client::connect(config, (ssh.host.clone(), ssh.port), handler),
+    )
+    .await
+    .map_err(|_| DbError::Other("SSH 连接超时".to_string()))?
+    .map_err(ssh_err)?;
     let auth = match pick_auth(ssh) {
         AuthKind::PublicKey => {
             // PEM 字符串（非文件路径）；加密私钥 passphrase 暂不支持（无 passphrase 入参）
@@ -300,5 +314,14 @@ mod tests {
             .await
             .expect("no handler error"));
         assert_eq!(slot.lock().unwrap().as_deref(), Some(fp.as_str()));
+    }
+
+    /// `ssh_connect_timeout`：kex 阶段超时阈值，设计定死恰好 10 秒。
+    #[test]
+    fn ssh_connect_timeout() {
+        assert_eq!(
+            super::ssh_connect_timeout(),
+            std::time::Duration::from_secs(10)
+        );
     }
 }

@@ -67,6 +67,9 @@ pub struct SshOptions {
     pub password: Option<String>,
     #[serde(default)]
     pub private_key: Option<String>,
+    /// TOFU 已信任主机指纹（非敏感，可落盘）
+    #[serde(default)]
+    pub host_key_fingerprint: Option<String>,
 }
 
 fn default_ssh_port() -> u16 {
@@ -207,4 +210,26 @@ pub async fn execute_buffered(
     let mut sink = CollectingSink::new(opts.max_rows);
     conn.execute_stream(schema, sql, opts, &mut sink).await?;
     Ok(sink.into_output())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ssh_options_fingerprint_roundtrips() {
+        let s = SshOptions {
+            enabled: true,
+            host: "h".into(),
+            port: 22,
+            user: "u".into(),
+            password: None,
+            private_key: None,
+            host_key_fingerprint: Some("SHA256:x".into()),
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("host_key_fingerprint"));
+        let back: SshOptions = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.host_key_fingerprint.as_deref(), Some("SHA256:x"));
+    }
 }

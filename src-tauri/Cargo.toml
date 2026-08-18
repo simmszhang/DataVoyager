@@ -24,3 +24,6 @@ keyring = "3"
 uuid.workspace = true
 dby-core = { path = "../crates/dby-core" }
 dby-driver-mysql = { path = "../crates/dby-driver-mysql" }
+
+[dev-dependencies]
+serde_json.workspace = true

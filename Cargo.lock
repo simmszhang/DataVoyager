@@ -857,6 +857,7 @@ dependencies = [
  "dby-driver-mysql",
  "keyring",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tokio",

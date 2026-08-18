@@ -159,6 +159,7 @@ export interface ConnectionSummary {
   server_version: string;
 }
 
+/// list_saved_connections 的脱敏视图：不含任何 secret 字段（#22）。
 export interface SavedConnection {
   id: string;
   project_id: string;
@@ -168,6 +169,11 @@ export interface SavedConnection {
   port: number;
   user: string;
   database?: string | null;
+  has_ssh: boolean;
+  ssh_host?: string | null;
+  ssh_port?: number | null;
+  ssh_user?: string | null;
+  color?: string | null;
 }
 
 // ---------- 历史 ----------

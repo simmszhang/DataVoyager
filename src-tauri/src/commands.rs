@@ -38,6 +38,24 @@ pub struct ConnectionSummary {
     pub server_version: String,
 }
 
+/// 已保存连接的脱敏视图：仅暴露非敏感字段，绝不携带密码/私钥（#22）。
+#[derive(Serialize)]
+pub struct SavedConnectionView {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub driver: String,
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub database: Option<String>,
+    pub has_ssh: bool,
+    pub ssh_host: Option<String>,
+    pub ssh_port: Option<u16>,
+    pub ssh_user: Option<String>,
+    pub color: Option<String>,
+}
+
 fn snapshot(a: &ActiveConnection) -> ConnectionSummary {
     ConnectionSummary {
         id: a.id,
@@ -171,13 +189,32 @@ fn auto_name(params: &ConnectParams) -> String {
 pub async fn list_saved_connections(
     state: State<'_, Arc<AppState>>,
     project_id: Option<String>,
-) -> Result<Vec<ConnectionConfig>> {
+) -> Result<Vec<SavedConnectionView>> {
     let cfg = state.config.lock().await;
     Ok(cfg
         .connections
         .iter()
-        .filter(|c| project_id.as_deref().map(|p| c.project_id == p).unwrap_or(true))
-        .cloned()
+        .filter(|c| {
+            project_id
+                .as_deref()
+                .map(|p| c.project_id == p)
+                .unwrap_or(true)
+        })
+        .map(|c| SavedConnectionView {
+            id: c.id.clone(),
+            project_id: c.project_id.clone(),
+            name: c.name.clone(),
+            driver: c.driver.clone(),
+            host: c.host.clone(),
+            port: c.port,
+            user: c.user.clone(),
+            database: c.database.clone(),
+            has_ssh: c.ssh.as_ref().map(|s| s.enabled).unwrap_or(false),
+            ssh_host: c.ssh.as_ref().map(|s| s.host.clone()),
+            ssh_port: c.ssh.as_ref().map(|s| s.port),
+            ssh_user: c.ssh.as_ref().map(|s| s.user.clone()),
+            color: c.color.clone(),
+        })
         .collect())
 }
 
@@ -851,6 +888,32 @@ pub async fn export_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 脱敏视图序列化后不得出现任何 secret 字段/值（#22）。
+    #[test]
+    fn saved_view_has_no_secret() {
+        let v = SavedConnectionView {
+            id: "c1".to_string(),
+            project_id: "p1".to_string(),
+            name: "demo".to_string(),
+            driver: "mysql".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 3306,
+            user: "root".to_string(),
+            database: Some("app".to_string()),
+            has_ssh: true,
+            ssh_host: Some("10.0.0.1".to_string()),
+            ssh_port: Some(22),
+            ssh_user: Some("ubuntu".to_string()),
+            color: Some("#1e90ff".to_string()),
+        };
+        let json = serde_json::to_string(&v).unwrap();
+        assert!(!json.contains("password"), "JSON 不得包含 password 字段");
+        assert!(
+            !json.contains("private_key"),
+            "JSON 不得包含 private_key 字段"
+        );
+    }
 
     #[test]
     fn guard_rejects_dangerous_without_confirm() {

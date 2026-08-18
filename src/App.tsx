@@ -135,7 +135,7 @@ export default function App() {
     });
   }
 
-  async function runQuery(id: number, sql: string) {
+  async function runQuery(id: number, sql: string, confirmed: boolean = false) {
     const db = workspaces[id]?.selectedDb ?? "";
     updateWorkspace(id, {
       running: true,
@@ -172,7 +172,7 @@ export default function App() {
       }
     };
     try {
-      await api.executeQueryStream(channel, id, db || null, sql);
+      await api.executeQueryStream(channel, id, db || null, sql, confirmed);
       const r = workspaces[id]?.result;
       setStatus(r && r.columns ? `返回 ${r.rows.length} 行` : `影响 ${r?.affected_rows ?? 0} 行`);
     } catch (e) {
@@ -331,7 +331,7 @@ export default function App() {
     if (!projectId) return;
     if (!window.confirm("删除该项目？项目下连接需先删除。")) return;
     try {
-      await api.deleteProject(projectId);
+      await api.deleteProject(projectId, true);
       await refreshProjects();
     } catch (e) {
       setStatus(String(e));
@@ -627,7 +627,7 @@ export default function App() {
                 onClick={() => {
                   const sql = pendingDanger.sql;
                   setPendingDanger(null);
-                  if (activeId) runQuery(activeId, sql);
+                  if (activeId) runQuery(activeId, sql, true);
                 }}
               >
                 确认执行

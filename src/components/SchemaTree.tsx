@@ -77,7 +77,7 @@ export default function SchemaTree({
     const newName = window.prompt("新表名", n.name);
     if (!newName || newName === n.name) return;
     api
-      .renameTable(n.connId, n.database, n.name, newName)
+      .renameTable(n.connId, n.database, n.name, newName, true)
       .then(() => loadChildren(dbKey(n.connId, n.database)))
       .catch((e) => setStatus(String(e)));
   }
@@ -85,7 +85,7 @@ export default function SchemaTree({
   function handleDropDatabase(n: { connId: number; name: string }) {
     if (!window.confirm(`确定删除数据库「${n.name}」？此操作不可撤销。`)) return;
     api
-      .dropDatabase(n.connId, n.name)
+      .dropDatabase(n.connId, n.name, true)
       .then(() => loadChildren(connKey(n.connId)))
       .catch((e) => setStatus(String(e)));
   }
@@ -93,7 +93,7 @@ export default function SchemaTree({
   function handleDropTable(n: { connId: number; database: string; name: string }) {
     if (!window.confirm(`确定删除表「${n.name}」？此操作不可撤销。`)) return;
     api
-      .dropTable(n.connId, n.database, n.name)
+      .dropTable(n.connId, n.database, n.name, true)
       .then(() => loadChildren(dbKey(n.connId, n.database)))
       .catch((e) => setStatus(String(e)));
   }

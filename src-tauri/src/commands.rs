@@ -306,7 +306,9 @@ pub async fn execute_query(
     id: u64,
     database: Option<String>,
     sql: String,
+    confirmed: bool,
 ) -> Result<QueryOutput> {
+    guard_dangerous(&sql, confirmed)?;
     let started = Utc::now();
     let (project_id, conn_name, result) = {
         let mut guard = state.connections.lock().await;
@@ -384,7 +386,14 @@ pub async fn rename_project(
 }
 
 #[tauri::command]
-pub async fn delete_project(state: State<'_, Arc<AppState>>, id: String) -> Result<()> {
+pub async fn delete_project(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    confirmed: bool,
+) -> Result<()> {
+    if !confirmed {
+        return Err(DbError::Config("危险操作需二次确认".to_string()));
+    }
     {
         let guard = state.connections.lock().await;
         if guard.values().any(|c| c.project_id == id) {
@@ -469,7 +478,9 @@ pub async fn execute_query_stream(
     id: u64,
     database: Option<String>,
     sql: String,
+    confirmed: bool,
 ) -> Result<()> {
+    guard_dangerous(&sql, confirmed)?;
     let started = Utc::now();
     let (project_id, conn_name, result, row_count) = {
         let mut guard = state.connections.lock().await;
@@ -530,6 +541,15 @@ pub async fn cancel_query(state: State<'_, Arc<AppState>>, id: u64) -> Result<()
 #[tauri::command]
 pub fn analyze_danger(sql: String) -> DangerLevel {
     dby_core::danger::analyze_danger(&sql)
+}
+
+/// 服务端危险复检（纵深防御）：危险 SQL 且未二次确认 → 拒绝；其余放行。
+/// 前端确认弹窗通过后传 `confirmed=true`，绕过前端的调用一律被拦截。
+fn guard_dangerous(sql: &str, confirmed: bool) -> Result<()> {
+    if dby_core::danger::analyze_danger(sql).is_dangerous() && !confirmed {
+        return Err(DbError::Config("危险操作需二次确认".to_string()));
+    }
+    Ok(())
 }
 
 // ---------- 事务 ----------
@@ -727,9 +747,11 @@ pub async fn drop_database(
     state: State<'_, Arc<AppState>>,
     id: u64,
     name: String,
+    confirmed: bool,
 ) -> Result<QueryOutput> {
     let driver = driver_for(state.inner(), id).await?;
     let sql = dby_core::ddl::build_drop_database(driver.dialect(), &name);
+    guard_dangerous(&sql, confirmed)?;
     run_ddl(state.inner(), id, None, sql).await
 }
 
@@ -753,9 +775,11 @@ pub async fn rename_table(
     database: String,
     old_name: String,
     new_name: String,
+    confirmed: bool,
 ) -> Result<QueryOutput> {
     let driver = driver_for(state.inner(), id).await?;
     let sql = dby_core::ddl::build_rename_table(driver.dialect(), &old_name, &new_name);
+    guard_dangerous(&sql, confirmed)?;
     run_ddl(state.inner(), id, Some(database), sql).await
 }
 
@@ -765,9 +789,11 @@ pub async fn drop_table(
     id: u64,
     database: String,
     name: String,
+    confirmed: bool,
 ) -> Result<QueryOutput> {
     let driver = driver_for(state.inner(), id).await?;
     let sql = dby_core::ddl::build_drop_table(driver.dialect(), &name);
+    guard_dangerous(&sql, confirmed)?;
     run_ddl(state.inner(), id, Some(database), sql).await
 }
 
@@ -781,7 +807,9 @@ pub async fn export_result(
     sql: String,
     format: String,
     table: Option<String>,
+    confirmed: bool,
 ) -> Result<String> {
+    guard_dangerous(&sql, confirmed)?;
     let started = Utc::now();
     let (project_id, conn_name, driver_id, output) = {
         let mut guard = state.connections.lock().await;
@@ -838,4 +866,17 @@ pub async fn export_result(
         other => return Err(DbError::Config(format!("未知导出格式: {other}"))),
     };
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guard_rejects_dangerous_without_confirm() {
+        assert!(guard_dangerous("DROP TABLE t", false).is_err());
+        assert!(guard_dangerous("DROP TABLE t", true).is_ok());
+        assert!(guard_dangerous("SELECT 1", false).is_ok());
+        assert!(guard_dangerous("UPDATE t SET x=1", false).is_ok()); // Warn 非 Dangerous，走前端提示
+    }
 }

@@ -21,7 +21,7 @@ export default function ExportDialog({ connectionId, database, sql, onClose }: P
     setError(null);
     setCopied(false);
     try {
-      const t = await api.exportResult(connectionId, database, sql, format, table || null);
+      const t = await api.exportResult(connectionId, database, sql, format, table || null, false);
       setText(t);
     } catch (e) {
       setError(String(e));

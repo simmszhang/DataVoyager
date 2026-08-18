@@ -231,14 +231,15 @@ export const api = {
     invoke<TableInfo[]>("list_tables", { id, database }),
   listColumns: (id: number, database: string, table: string) =>
     invoke<ColumnInfo[]>("list_columns", { id, database, table }),
-  executeQuery: (id: number, database: string | null, sql: string) =>
-    invoke<QueryOutput>("execute_query", { id, database, sql }),
+  executeQuery: (id: number, database: string | null, sql: string, confirmed: boolean) =>
+    invoke<QueryOutput>("execute_query", { id, database, sql, confirmed }),
   executeQueryStream: (
     channel: Channel<StreamEvent>,
     id: number,
     database: string | null,
     sql: string,
-  ) => invoke<void>("execute_query_stream", { channel, id, database, sql }),
+    confirmed: boolean,
+  ) => invoke<void>("execute_query_stream", { channel, id, database, sql, confirmed }),
   cancelQuery: (id: number) => invoke<void>("cancel_query", { id }),
   analyzeDanger: (sql: string) => invoke<DangerLevel>("analyze_danger", { sql }),
 
@@ -253,7 +254,8 @@ export const api = {
     sql: string,
     format: string,
     table?: string | null,
-  ) => invoke<string>("export_result", { id, database, sql, format, table }),
+    confirmed: boolean = false,
+  ) => invoke<string>("export_result", { id, database, sql, format, table, confirmed }),
   buildEditSql: (
     id: number,
     table: string,
@@ -270,20 +272,26 @@ export const api = {
 
   createDatabase: (id: number, name: string) =>
     invoke<QueryOutput>("create_database", { id, name }),
-  dropDatabase: (id: number, name: string) =>
-    invoke<QueryOutput>("drop_database", { id, name }),
+  dropDatabase: (id: number, name: string, confirmed: boolean) =>
+    invoke<QueryOutput>("drop_database", { id, name, confirmed }),
   createTable: (id: number, database: string, name: string, columns: ColumnDef[]) =>
     invoke<QueryOutput>("create_table", { id, database, name, columns }),
-  renameTable: (id: number, database: string, oldName: string, newName: string) =>
-    invoke<QueryOutput>("rename_table", { id, database, oldName, newName }),
-  dropTable: (id: number, database: string, name: string) =>
-    invoke<QueryOutput>("drop_table", { id, database, name }),
+  renameTable: (
+    id: number,
+    database: string,
+    oldName: string,
+    newName: string,
+    confirmed: boolean,
+  ) => invoke<QueryOutput>("rename_table", { id, database, oldName, newName, confirmed }),
+  dropTable: (id: number, database: string, name: string, confirmed: boolean) =>
+    invoke<QueryOutput>("drop_table", { id, database, name, confirmed }),
 
   listProjects: () => invoke<Project[]>("list_projects"),
   createProject: (name: string) => invoke<Project>("create_project", { name }),
   renameProject: (id: string, name: string) =>
     invoke<Project>("rename_project", { id, name }),
-  deleteProject: (id: string) => invoke<void>("delete_project", { id }),
+  deleteProject: (id: string, confirmed: boolean) =>
+    invoke<void>("delete_project", { id, confirmed }),
 
   searchHistory: (query: string, projectId?: string | null) =>
     invoke<StatementHit[]>("search_history", { query, projectId }),

@@ -63,9 +63,10 @@ pub struct SshOptions {
     #[serde(default = "default_ssh_port")]
     pub port: u16,
     pub user: String,
-    #[serde(default)]
+    /// 敏感凭据：仅作输入（Deserialize），序列化时跳过，绝不落盘
+    #[serde(default, skip_serializing)]
     pub password: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub private_key: Option<String>,
     /// TOFU 已信任主机指纹（非敏感，可落盘）
     #[serde(default)]
@@ -231,5 +232,25 @@ mod tests {
         assert!(json.contains("host_key_fingerprint"));
         let back: SshOptions = serde_json::from_str(&json).unwrap();
         assert_eq!(back.host_key_fingerprint.as_deref(), Some("SHA256:x"));
+    }
+
+    #[test]
+    fn ssh_options_never_serialize_secrets() {
+        let s = SshOptions {
+            enabled: true,
+            host: "h".into(),
+            port: 22,
+            user: "u".into(),
+            password: Some("pw".into()),
+            private_key: Some("k".into()),
+            host_key_fingerprint: None,
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("password"));
+        assert!(!json.contains("private_key"));
+        assert!(!json.contains("pw"));
+        let back: SshOptions = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.password, None); // 反序列化默认 None（secret 不落盘后读不到）
+        assert_eq!(back.private_key, None);
     }
 }

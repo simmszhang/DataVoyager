@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
+use crate::dialect::Dialect;
 use crate::metadata::ColumnInfo;
 use crate::value::Value;
 
@@ -58,6 +59,17 @@ impl SqlOrigin {
             "cli" => SqlOrigin::Cli,
             _ => SqlOrigin::Other,
         }
+    }
+}
+
+/// 按方言生成表浏览 SQL：`SELECT * FROM {quoted} [LIMIT n]`。
+/// 不带库名前缀——当前库上下文由驱动 `execute_stream` 的 `USE {db}` 负责（见设计 4.1）。
+/// `limit` 为 `None` 时不追加任何子句（无尾随空格）。
+pub fn build_table_select(dialect: &dyn Dialect, table: &str, limit: Option<u64>) -> String {
+    let q = dialect.quote_identifier(table);
+    match limit {
+        Some(n) => format!("SELECT * FROM {q} {}", dialect.limit_clause(Some(n), None)),
+        None => format!("SELECT * FROM {q}"),
     }
 }
 
@@ -253,6 +265,8 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::dialect::Dialect;
+    use crate::metadata::ColumnType;
 
     #[test]
     fn cancel_token_works() {
@@ -359,5 +373,72 @@ mod tests {
         let json = serde_json::to_value(err).unwrap();
         assert_eq!(json["data"]["message"], "x");
         assert_eq!(json["data"]["kind"], "cancelled");
+    }
+
+    /// 双引号方言（Postgres 风格）。
+    struct Pg;
+    impl Dialect for Pg {
+        fn quote_identifier(&self, ident: &str) -> String {
+            format!("\"{}\"", ident)
+        }
+        fn quote_string(&self, s: &str) -> String {
+            format!("'{}'", s)
+        }
+        fn limit_clause(&self, limit: Option<u64>, offset: Option<u64>) -> String {
+            match (limit, offset) {
+                (Some(l), None) => format!("LIMIT {l}"),
+                (Some(l), Some(o)) => format!("LIMIT {l} OFFSET {o}"),
+                (None, Some(o)) => format!("OFFSET {o}"),
+                (None, None) => String::new(),
+            }
+        }
+        fn parse_column_type(&self, _raw: &str) -> Option<ColumnType> {
+            None
+        }
+        fn display_type_name(&self, ct: &ColumnType) -> String {
+            format!("{:?}", ct.base)
+        }
+    }
+
+    /// 反引号方言（MySQL 风格，替代 dby-core 不可依赖的 dby-driver-mysql::MysqlDialect）。
+    struct Mysql;
+    impl Dialect for Mysql {
+        fn quote_identifier(&self, ident: &str) -> String {
+            format!("`{}`", ident.replace('`', "``"))
+        }
+        fn quote_string(&self, s: &str) -> String {
+            format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
+        }
+        fn limit_clause(&self, limit: Option<u64>, offset: Option<u64>) -> String {
+            match (limit, offset) {
+                (Some(l), Some(o)) => format!("LIMIT {o}, {l}"),
+                (Some(l), None) => format!("LIMIT {l}"),
+                (None, Some(o)) => format!("LIMIT {o}, 18446744073709551615"),
+                (None, None) => String::new(),
+            }
+        }
+        fn parse_column_type(&self, _raw: &str) -> Option<ColumnType> {
+            None
+        }
+        fn display_type_name(&self, ct: &ColumnType) -> String {
+            format!("{:?}", ct.base)
+        }
+    }
+
+    #[test]
+    fn build_table_select_uses_dialect_quoting() {
+        assert_eq!(
+            build_table_select(&Pg, "users", Some(100)),
+            "SELECT * FROM \"users\" LIMIT 100"
+        );
+        assert_eq!(
+            build_table_select(&Mysql, "users", Some(100)),
+            "SELECT * FROM `users` LIMIT 100"
+        );
+        // 无 limit 时不追加任何子句，且不留尾随空格
+        assert_eq!(
+            build_table_select(&Pg, "users", None),
+            "SELECT * FROM \"users\""
+        );
     }
 }

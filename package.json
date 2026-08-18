@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "check:i18n": "node src/locales/check-keys.mjs"
   },
   "dependencies": {
     "@codemirror/lang-sql": "^6",

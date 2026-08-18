@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -12,7 +13,9 @@ use dby_core::error::{DbError, Result};
 use dby_core::history::{ExecutionRecord, HistoryFilter, StatementHit};
 use dby_core::metadata::{ColumnInfo, ColumnType, TableInfo};
 use dby_core::project::Project;
-use dby_core::query::{ExecOpts, QueryOutput, ResultSink, SqlOrigin, StreamEvent};
+use dby_core::query::{
+    CancellationToken, ExecOpts, QueryOutput, ResultSink, SqlOrigin, StreamEvent,
+};
 use tauri::ipc::Channel;
 
 use crate::secrets::{delete_secret, get_secret, secret_key, set_secret, SecretKind};
@@ -536,6 +539,19 @@ pub async fn execute_query(
 ) -> Result<QueryOutput> {
     guard_dangerous(&sql, confirmed)?;
     let started = Utc::now();
+    // 查询实例 token：注册到全局注册表（Arc 共享内部状态），RAII 守卫保证任何退出路径（含 `?` 早退）自动注销（#23）。
+    let query_id = uuid::Uuid::new_v4().to_string();
+    let key = format!("{id}:{query_id}");
+    let token = CancellationToken::new();
+    state
+        .query_tokens
+        .lock()
+        .unwrap()
+        .insert(key.clone(), Arc::new(token.clone()));
+    let _guard = QueryTokenGuard {
+        map: state.query_tokens.clone(),
+        key,
+    };
     let entry = state
         .connections
         .lock()
@@ -550,7 +566,10 @@ pub async fn execute_query(
         active.conn.as_mut(),
         database.as_deref(),
         &sql,
-        &ExecOpts::default(),
+        &ExecOpts {
+            cancel: Some(token),
+            ..Default::default()
+        },
     )
     .await;
 
@@ -734,6 +753,19 @@ pub async fn execute_query_stream(
 ) -> Result<()> {
     guard_dangerous(&sql, confirmed)?;
     let started = Utc::now();
+    // 查询实例 token：注册到全局注册表（Arc 共享内部状态），RAII 守卫保证任何退出路径（含 `?` 早退）自动注销（#23）。
+    let query_id = uuid::Uuid::new_v4().to_string();
+    let key = format!("{id}:{query_id}");
+    let token = CancellationToken::new();
+    state
+        .query_tokens
+        .lock()
+        .unwrap()
+        .insert(key.clone(), Arc::new(token.clone()));
+    let _guard = QueryTokenGuard {
+        map: state.query_tokens.clone(),
+        key,
+    };
     let entry = state
         .connections
         .lock()
@@ -744,8 +776,10 @@ pub async fn execute_query_stream(
     let mut active = entry.lock().await;
     let project_id = active.project_id.clone();
     let conn_name = active.name.clone();
-    // Task 4 引入查询实例 token 后在此注入 `ExecOpts.cancel`（#23）；当前取消能力由 Task 4 恢复。
-    let opts = ExecOpts::default();
+    let opts = ExecOpts {
+        cancel: Some(token),
+        ..Default::default()
+    };
     let mut sink = ChannelSink { channel, rows: 0 };
     let result = active
         .conn
@@ -779,16 +813,37 @@ pub async fn execute_query_stream(
     }
 }
 
-#[tauri::command]
-pub async fn cancel_query(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
-    // 只读查询实例 token 注册表（不抢连接锁，#21/#23）；Task 4 填充 token，当前为空。
-    let tokens = state.query_tokens.lock().unwrap();
+/// 查询实例 token 的 RAII 注销守卫：离开作用域即从注册表移除，任何退出路径（含 `?` 早退）不泄漏（#23）。
+struct QueryTokenGuard {
+    map: Arc<std::sync::Mutex<HashMap<String, Arc<CancellationToken>>>>,
+    key: String,
+}
+
+impl Drop for QueryTokenGuard {
+    fn drop(&mut self) {
+        self.map.lock().unwrap().remove(&self.key);
+    }
+}
+
+/// 取消某连接的全部查询实例 token：只读注册表、同步锁不跨 await（#21/#23）。
+/// 从 `cancel_query` 抽出以便单测（Tauri `State` 无法在测试中构造）。
+fn cancel_queries_for_connection(
+    tokens: &std::sync::Mutex<HashMap<String, Arc<CancellationToken>>>,
+    id: u64,
+) {
+    let tokens = tokens.lock().unwrap();
     let prefix = format!("{id}:");
     for (k, t) in tokens.iter() {
         if k.starts_with(&prefix) {
             t.cancel();
         }
     }
+}
+
+#[tauri::command]
+pub async fn cancel_query(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
+    // 只读查询实例 token 注册表（不抢连接锁，#21/#23）。
+    cancel_queries_for_connection(&state.query_tokens, id);
     Ok(())
 }
 
@@ -1117,6 +1172,19 @@ pub async fn export_result(
 ) -> Result<String> {
     guard_dangerous(&sql, confirmed)?;
     let started = Utc::now();
+    // 查询实例 token：注册到全局注册表（Arc 共享内部状态），RAII 守卫保证任何退出路径（含 `?` 早退）自动注销（#23）。
+    let query_id = uuid::Uuid::new_v4().to_string();
+    let key = format!("{id}:{query_id}");
+    let token = CancellationToken::new();
+    state
+        .query_tokens
+        .lock()
+        .unwrap()
+        .insert(key.clone(), Arc::new(token.clone()));
+    let _guard = QueryTokenGuard {
+        map: state.query_tokens.clone(),
+        key,
+    };
     let entry = state
         .connections
         .lock()
@@ -1132,7 +1200,10 @@ pub async fn export_result(
         active.conn.as_mut(),
         database.as_deref(),
         &sql,
-        &ExecOpts::default(),
+        &ExecOpts {
+            cancel: Some(token),
+            ..Default::default()
+        },
     )
     .await;
 
@@ -1513,5 +1584,31 @@ mod tests {
         )];
         let err = parse_cells(&bad).unwrap_err();
         assert!(err.to_string().contains("无法将 'abc' 解析为 i64"));
+    }
+
+    /// `cancel_query` 只取消前缀 `"{id}:"` 匹配的查询实例 token，其它连接的 token 不受影响（#23）。
+    /// 直接测抽出的注册表取消逻辑（Tauri `State` 无法在测试中构造，行为等价于 `cancel_query`）。
+    #[tokio::test]
+    async fn cancel_query_hits_only_matching_connection() {
+        let state = Arc::new(AppState::new(
+            dby_core::config::AppConfig::with_default_project(),
+            dby_core::history::HistoryStore::open_in_memory().unwrap(),
+            std::path::PathBuf::from("unused-config.json"),
+        ));
+        let t1 = Arc::new(dby_core::query::CancellationToken::new());
+        let t2 = Arc::new(dby_core::query::CancellationToken::new());
+        {
+            let mut tokens = state.query_tokens.lock().unwrap();
+            tokens.insert("1:q1".to_string(), t1.clone());
+            tokens.insert("2:q2".to_string(), t2.clone());
+        }
+
+        cancel_queries_for_connection(&state.query_tokens, 1);
+
+        assert!(t1.is_cancelled(), "前缀 \"1:\" 的查询 token 必须被取消");
+        assert!(
+            !t2.is_cancelled(),
+            "其它连接（\"2:q2\"）的 token 不得被取消"
+        );
     }
 }

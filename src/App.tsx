@@ -176,6 +176,22 @@ export default function App() {
           break;
         case "info":
           break;
+        case "result_set_end":
+          // 结果集边界：多结果集展示/切换属 Task 5，此处仅占位，不结算当前集。
+          break;
+        case "truncated":
+          mutateResult(id, (r) => {
+            r.truncated = true;
+          });
+          break;
+        case "done":
+          // 命令成功收尾（S4）：由 channel 终态复位 running，与 invoke 返回解耦。
+          updateWorkspace(id, { running: false });
+          break;
+        case "error":
+          // 命令失败收尾（S4/S5）：kind 供后续区分「取消」与「失败」（#29）。
+          updateWorkspace(id, { error: ev.data.message, running: false });
+          break;
       }
     };
     try {

@@ -164,7 +164,11 @@ export type StreamEvent =
   | { event: "columns"; data: ColumnInfo[] }
   | { event: "rows"; data: CellValue[][] }
   | { event: "affected"; data: { affected_rows: number; last_insert_id: number | null } }
-  | { event: "info"; data: string | null };
+  | { event: "info"; data: string | null }
+  | { event: "result_set_end" }
+  | { event: "truncated" }
+  | { event: "done" }
+  | { event: "error"; data: { kind: string; message: string } };
 
 export interface StreamResult {
   columns: ColumnInfo[] | null;

@@ -777,6 +777,8 @@ pub async fn delete_execution(state: State<'_, Arc<AppState>>, id: String) -> Re
 struct ChannelSink {
     channel: Channel<StreamEvent>,
     rows: usize,
+    /// 查询实例 token（#5/S1）：channel send 失败（前端已关闭）时主动取消后端（#42）。
+    cancel: CancellationToken,
 }
 
 impl ResultSink for ChannelSink {
@@ -786,7 +788,17 @@ impl ResultSink for ChannelSink {
         }
         if let Err(e) = self.channel.send(ev) {
             log::warn!("转发流式事件到前端失败: {e}");
+            // 前端已关闭 channel（#42）：主动取消查询，避免后端继续执行成无主孤儿。
+            self.cancel.cancel();
         }
+    }
+}
+
+/// 把 `DbError` 映射为 S5 流式终止事件 kind（前端据此区分「取消」与「失败」，#29）。
+fn stream_error_kind(e: &DbError) -> &'static str {
+    match e {
+        DbError::Cancelled => "cancelled",
+        _ => "database",
     }
 }
 
@@ -826,10 +838,14 @@ pub async fn execute_query_stream(
     let project_id = active.project_id.clone();
     let conn_name = active.name.clone();
     let opts = ExecOpts {
-        cancel: Some(token),
+        cancel: Some(token.clone()),
         ..Default::default()
     };
-    let mut sink = ChannelSink { channel, rows: 0 };
+    let mut sink = ChannelSink {
+        channel,
+        rows: 0,
+        cancel: token,
+    };
     let result = active
         .conn
         .execute_stream(database.as_deref(), &sql, &opts, &mut sink)
@@ -846,6 +862,8 @@ pub async fn execute_query_stream(
 
     match result {
         Ok(()) => {
+            // 成功收尾：经 channel 发 Done（S4），与 invoke 返回值解耦（#28）。
+            let _ = sink.channel.send(StreamEvent::Done);
             rec.status = "ok".to_string();
             if let Err(e) = state.history.record(&rec) {
                 log::warn!("写入历史记录失败: {e}");
@@ -853,6 +871,11 @@ pub async fn execute_query_stream(
             Ok(())
         }
         Err(e) => {
+            // 失败收尾：经 channel 发 Error（携带 S5 kind），invoke 仍返回 Err（#28）。
+            let _ = sink.channel.send(StreamEvent::Error {
+                kind: stream_error_kind(&e).to_string(),
+                message: e.to_string(),
+            });
             // 秒断：取消即关 socket，连接毒化 → 标记重连；历史 status=cancelled（#5）。
             if matches!(e, DbError::Cancelled) {
                 active.needs_reconnect = true;
@@ -1677,6 +1700,34 @@ mod tests {
         assert!(
             !t2.is_cancelled(),
             "其它连接（\"2:q2\"）的 token 不得被取消"
+        );
+    }
+
+    /// `ChannelSink.on_event` 在 channel 已关闭（send 失败）时必须触发取消（#42）：
+    /// 前端关标签后 channel 失效，后端若继续执行就成了无主孤儿。
+    /// Tauri Channel 无法在测试中直接「关闭」，但 `Channel::new` 接受自定义 on_message，
+    /// 可注入必然失败的路径（design §6「可注入失败路径的抽象」），等价于前端已关闭 channel。
+    /// NOTE: 本机 shell 测试二进制无法运行（0xC0000139），运行时 RED/GREEN 延后验证。
+    #[test]
+    fn channel_sink_cancels_on_send_failure() {
+        let cancel = dby_core::query::CancellationToken::new();
+        let channel = Channel::<StreamEvent>::new(|_| {
+            Err(tauri::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "channel closed",
+            )))
+        });
+        let mut sink = ChannelSink {
+            channel,
+            rows: 0,
+            cancel: cancel.clone(),
+        };
+
+        sink.on_event(StreamEvent::Rows(Vec::new()));
+
+        assert!(
+            cancel.is_cancelled(),
+            "channel send 失败必须触发取消（#42）"
         );
     }
 }

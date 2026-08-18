@@ -125,6 +125,16 @@
     "beginTransaction": "开始事务",
     "autocommitTitle": "关闭后需手动提交/回滚"
   },
+  "error": {
+    "database": "数据库错误：{{message}}",
+    "driver_not_found": "未找到数据库驱动：{{message}}",
+    "connection_not_found": "连接不存在：{{message}}",
+    "unsupported": "不支持的操作：{{message}}",
+    "config": "配置错误：{{message}}",
+    "storage": "存储错误：{{message}}",
+    "cancelled": "操作已取消",
+    "other": "操作失败"
+  },
   "grid": {
     "null": "NULL",
     "rowsReturned": "返回 {{count}} 行",

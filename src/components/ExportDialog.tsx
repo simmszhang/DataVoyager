@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api";
+import { errToString } from "../i18n";
 
 interface Props {
   connectionId: number;
@@ -26,7 +27,7 @@ export default function ExportDialog({ connectionId, database, sql, onClose }: P
       const t = await api.exportResult(connectionId, database, sql, format, table || null, false);
       setText(t);
     } catch (e) {
-      setError(String(e));
+      setError(errToString(e));
     } finally {
       setBusy(false);
     }
@@ -38,7 +39,7 @@ export default function ExportDialog({ connectionId, database, sql, onClose }: P
       await navigator.clipboard.writeText(text);
       setCopied(true);
     } catch (e) {
-      setError(String(e));
+      setError(errToString(e));
     }
   }
 

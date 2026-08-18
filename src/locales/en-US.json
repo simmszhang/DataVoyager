@@ -125,6 +125,16 @@
     "beginTransaction": "Begin Transaction",
     "autocommitTitle": "When off, commit/rollback manually"
   },
+  "error": {
+    "database": "Database error: {{message}}",
+    "driver_not_found": "Database driver not found: {{message}}",
+    "connection_not_found": "Connection not found: {{message}}",
+    "unsupported": "Unsupported operation: {{message}}",
+    "config": "Configuration error: {{message}}",
+    "storage": "Storage error: {{message}}",
+    "cancelled": "Operation cancelled",
+    "other": "Operation failed"
+  },
   "grid": {
     "null": "NULL",
     "rowsReturned": "{{count}} rows returned",

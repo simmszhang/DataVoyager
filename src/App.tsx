@@ -11,6 +11,7 @@ import {
   UNKNOWN_COLUMN_TYPE,
 } from "./api";
 import { useStore } from "./store";
+import { errToString } from "./i18n";
 import ConnectionDialog from "./components/ConnectionDialog";
 import SchemaTree from "./components/SchemaTree";
 import QueryEditor from "./components/QueryEditor";
@@ -102,7 +103,7 @@ export default function App() {
     try {
       await finishConnect();
     } catch (e) {
-      setStatus(String(e));
+      setStatus(errToString(e));
     }
   }
 
@@ -111,7 +112,7 @@ export default function App() {
       await api.reconnect(configId);
       await finishConnect();
     } catch (e) {
-      setStatus(String(e));
+      setStatus(errToString(e));
     }
   }
 
@@ -120,7 +121,7 @@ export default function App() {
       await api.deleteSavedConnection(configId);
       await refreshSaved();
     } catch (e) {
-      setStatus(String(e));
+      setStatus(errToString(e));
     }
   }
 
@@ -140,7 +141,7 @@ export default function App() {
       const sql = await api.buildTableSelect(connId, table);
       updateWorkspace(connId, { query: sql });
     } catch (e) {
-      updateWorkspace(connId, { error: String(e) });
+      updateWorkspace(connId, { error: errToString(e) });
       setStatus(t("app.status.tableSqlFailed"));
     }
   }
@@ -218,7 +219,7 @@ export default function App() {
       await api.executeQueryStream(channel, id, db || null, sql, confirmed);
       // 状态栏计数已移至 done 事件处理（design §4.5），invoke 返回不再结算。
     } catch (e) {
-      const msg = String(e);
+      const msg = errToString(e);
       // 取消（#5 秒断）：连接已毒化，下次使用自动重连 —— 提示而非报错。
       // running 兜底复位（design §7）：channel 终止事件可能先于 invoke 拒绝到达，重复复位无害。
       const cancelled = msg.includes("cancelled");
@@ -242,7 +243,7 @@ export default function App() {
       }
       await runQuery(activeId, sql);
     } catch (e) {
-      updateWorkspace(activeId, { error: String(e) });
+      updateWorkspace(activeId, { error: errToString(e) });
     }
   }
 
@@ -251,7 +252,7 @@ export default function App() {
     try {
       await api.cancelQuery(activeId);
     } catch (e) {
-      updateWorkspace(activeId, { error: String(e) });
+      updateWorkspace(activeId, { error: errToString(e) });
     }
   }
 
@@ -261,7 +262,7 @@ export default function App() {
       await api.begin(activeId);
       updateWorkspace(activeId, { inTransaction: true });
     } catch (e) {
-      updateWorkspace(activeId, { error: String(e) });
+      updateWorkspace(activeId, { error: errToString(e) });
     }
   }
 
@@ -272,7 +273,7 @@ export default function App() {
       updateWorkspace(activeId, { inTransaction: false });
       setStatus(t("app.status.committed"));
     } catch (e) {
-      updateWorkspace(activeId, { error: String(e) });
+      updateWorkspace(activeId, { error: errToString(e) });
     }
   }
 
@@ -283,7 +284,7 @@ export default function App() {
       updateWorkspace(activeId, { inTransaction: false });
       setStatus(t("app.status.rolledBack"));
     } catch (e) {
-      updateWorkspace(activeId, { error: String(e) });
+      updateWorkspace(activeId, { error: errToString(e) });
     }
   }
 
@@ -294,7 +295,7 @@ export default function App() {
       await api.setAutocommit(activeId, next);
       updateWorkspace(activeId, { autocommit: next });
     } catch (e) {
-      updateWorkspace(activeId, { error: String(e) });
+      updateWorkspace(activeId, { error: errToString(e) });
     }
   }
 
@@ -331,7 +332,7 @@ export default function App() {
       const sql = await api.buildEditSql(activeId, table, pk, set);
       setPendingEdit({ sql, table, database: ws.selectedDb || null, pk, set });
     } catch (e) {
-      updateWorkspace(activeId, { error: String(e) });
+      updateWorkspace(activeId, { error: errToString(e) });
     }
   }
 
@@ -345,7 +346,7 @@ export default function App() {
       const sql = workspaces[activeId]?.query;
       if (sql) runQuery(activeId, sql);
     } catch (e) {
-      updateWorkspace(activeId, { error: String(e) });
+      updateWorkspace(activeId, { error: errToString(e) });
     }
   }
 
@@ -366,7 +367,7 @@ export default function App() {
       const p = await api.createProject(name);
       await refreshProjects(p.id);
     } catch (e) {
-      setStatus(String(e));
+      setStatus(errToString(e));
     }
   }
 
@@ -379,7 +380,7 @@ export default function App() {
       await api.renameProject(projectId, name);
       await refreshProjects();
     } catch (e) {
-      setStatus(String(e));
+      setStatus(errToString(e));
     }
   }
 
@@ -390,7 +391,7 @@ export default function App() {
       await api.deleteProject(projectId, true);
       await refreshProjects();
     } catch (e) {
-      setStatus(String(e));
+      setStatus(errToString(e));
     }
   }
 
@@ -406,7 +407,7 @@ export default function App() {
       closeConnection(id);
       setStatus(null);
     } catch (e) {
-      setStatus(String(e));
+      setStatus(errToString(e));
     }
   }
 

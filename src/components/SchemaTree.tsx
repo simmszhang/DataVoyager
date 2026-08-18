@@ -1,6 +1,7 @@
 import { ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ColumnInfo, ConnectionSummary, TableInfo } from "../api";
+import { errToString } from "../i18n";
 import CreateTableDialog from "./CreateTableDialog";
 
 type MenuNode =
@@ -61,7 +62,7 @@ export default function SchemaTree({
         setColumns((p) => ({ ...p, [key]: list }));
       }
     } catch (e) {
-      setStatus(String(e));
+      setStatus(errToString(e));
     }
   }
 
@@ -86,7 +87,7 @@ export default function SchemaTree({
     api
       .renameTable(n.connId, n.database, n.name, newName, true)
       .then(() => loadChildren(dbKey(n.connId, n.database)))
-      .catch((e) => setStatus(String(e)));
+      .catch((e) => setStatus(errToString(e)));
   }
 
   function handleDropDatabase(n: { connId: number; name: string }) {
@@ -94,7 +95,7 @@ export default function SchemaTree({
     api
       .dropDatabase(n.connId, n.name, true)
       .then(() => loadChildren(connKey(n.connId)))
-      .catch((e) => setStatus(String(e)));
+      .catch((e) => setStatus(errToString(e)));
   }
 
   function handleDropTable(n: { connId: number; database: string; name: string }) {
@@ -102,7 +103,7 @@ export default function SchemaTree({
     api
       .dropTable(n.connId, n.database, n.name, true)
       .then(() => loadChildren(dbKey(n.connId, n.database)))
-      .catch((e) => setStatus(String(e)));
+      .catch((e) => setStatus(errToString(e)));
   }
 
   const nodes: ReactElement[] = [];

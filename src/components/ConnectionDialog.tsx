@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ConnectParams, DriverInfo } from "../api";
+import { errToString } from "../i18n";
 
 interface Props {
   drivers: DriverInfo[];
@@ -94,7 +95,7 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
       const version = await api.testConnection(ready);
       setMessage({ ok: true, text: t("connection.dialog.testSuccess", { version }) });
     } catch (e) {
-      setMessage({ ok: false, text: String(e) });
+      setMessage({ ok: false, text: errToString(e) });
     } finally {
       setBusy(null);
     }
@@ -110,7 +111,7 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
       await api.connect(ready, projectId, form.save, form.rememberPassword);
       onConnected();
     } catch (e) {
-      setMessage({ ok: false, text: String(e) });
+      setMessage({ ok: false, text: errToString(e) });
     } finally {
       setBusy(null);
     }
@@ -137,7 +138,7 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
         onConnected();
       }
     } catch (e) {
-      setMessage({ ok: false, text: String(e) });
+      setMessage({ ok: false, text: errToString(e) });
     } finally {
       setBusy(null);
     }

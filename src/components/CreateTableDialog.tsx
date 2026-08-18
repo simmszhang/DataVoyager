@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ColumnDef } from "../api";
+import { errToString } from "../i18n";
 
 interface Props {
   connId: number;
@@ -50,7 +51,7 @@ export default function CreateTableDialog({ connId, database, onDone, onClose }:
       await api.createTable(connId, database, tableName, valid);
       onDone();
     } catch (e) {
-      setError(String(e));
+      setError(errToString(e));
     } finally {
       setBusy(false);
     }

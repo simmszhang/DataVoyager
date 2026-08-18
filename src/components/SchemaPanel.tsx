@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { ColumnInfo, TableInfo } from "../api";
 
 interface Props {
@@ -23,12 +24,18 @@ export default function SchemaPanel({
   onSelectTable,
   onRefresh,
 }: Props) {
+  const { t } = useTranslation();
   return (
     <div className="schema-panel">
       <div className="panel-section">
         <div className="section-row">
-          <span className="section-title">数据库</span>
-          <button className="icon-btn" onClick={onRefresh} disabled={loading} aria-label="刷新">
+          <span className="section-title">{t("schema.databases")}</span>
+          <button
+            className="icon-btn"
+            onClick={onRefresh}
+            disabled={loading}
+            aria-label={t("schema.refresh")}
+          >
             ⟳
           </button>
         </div>
@@ -37,7 +44,7 @@ export default function SchemaPanel({
           onChange={(e) => onSelectDb(e.target.value)}
           disabled={loading}
         >
-          <option value="">选择数据库…</option>
+          <option value="">{t("schema.selectDatabase")}</option>
           {databases.map((db) => (
             <option key={db} value={db}>
               {db}
@@ -48,7 +55,7 @@ export default function SchemaPanel({
 
       <div className="panel-section grow">
         <div className="section-row">
-          <span className="section-title">表</span>
+          <span className="section-title">{t("schema.tables")}</span>
           <span className="count">{tables.length}</span>
         </div>
         <div className="list">
@@ -64,7 +71,7 @@ export default function SchemaPanel({
             </div>
           ))}
           {!loading && selectedDb && tables.length === 0 && (
-            <div className="empty">没有表</div>
+            <div className="empty">{t("schema.noTables")}</div>
           )}
         </div>
       </div>
@@ -72,7 +79,7 @@ export default function SchemaPanel({
       {selectedTable && (
         <div className="panel-section columns">
           <div className="section-row">
-            <span className="section-title">列</span>
+            <span className="section-title">{t("schema.columns")}</span>
             <span className="count">{columns.length}</span>
           </div>
           <div className="list">

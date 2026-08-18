@@ -1,4 +1,5 @@
 import { ReactElement, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, ColumnInfo, ConnectionSummary, TableInfo } from "../api";
 import CreateTableDialog from "./CreateTableDialog";
 
@@ -37,6 +38,7 @@ export default function SchemaTree({
   onDisconnect,
   onOpenTable,
 }: Props) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dbs, setDbs] = useState<Record<string, string[]>>({});
   const [tables, setTables] = useState<Record<string, TableInfo[]>>({});
@@ -79,7 +81,7 @@ export default function SchemaTree({
   }
 
   function handleRenameTable(n: { connId: number; database: string; name: string }) {
-    const newName = window.prompt("新表名", n.name);
+    const newName = window.prompt(t("tree.renamePrompt"), n.name);
     if (!newName || newName === n.name) return;
     api
       .renameTable(n.connId, n.database, n.name, newName, true)
@@ -88,7 +90,7 @@ export default function SchemaTree({
   }
 
   function handleDropDatabase(n: { connId: number; name: string }) {
-    if (!window.confirm(`确定删除数据库「${n.name}」？此操作不可撤销。`)) return;
+    if (!window.confirm(t("tree.dropDatabaseConfirm", { name: n.name }))) return;
     api
       .dropDatabase(n.connId, n.name, true)
       .then(() => loadChildren(connKey(n.connId)))
@@ -96,7 +98,7 @@ export default function SchemaTree({
   }
 
   function handleDropTable(n: { connId: number; database: string; name: string }) {
-    if (!window.confirm(`确定删除表「${n.name}」？此操作不可撤销。`)) return;
+    if (!window.confirm(t("tree.dropTableConfirm", { name: n.name }))) return;
     api
       .dropTable(n.connId, n.database, n.name, true)
       .then(() => loadChildren(dbKey(n.connId, n.database)))
@@ -189,27 +191,27 @@ export default function SchemaTree({
   if (menu) {
     const node = menu.node;
     if (node.kind === "connection") {
-      menuItems.push({ label: "断开连接", action: () => onDisconnect(node.connId) });
+      menuItems.push({ label: t("tree.menu.disconnect"), action: () => onDisconnect(node.connId) });
     } else if (node.kind === "database") {
       menuItems.push({
-        label: "新建表",
+        label: t("tree.menu.createTable"),
         action: () => setCreateTable({ connId: node.connId, database: node.name }),
       });
-      menuItems.push({ label: "删除数据库", action: () => handleDropDatabase(node) });
+      menuItems.push({ label: t("tree.menu.dropDatabase"), action: () => handleDropDatabase(node) });
     } else if (node.kind === "table") {
       menuItems.push({
-        label: "查询数据",
+        label: t("tree.menu.queryData"),
         action: () => onOpenTable(node.connId, node.database, node.name),
       });
-      menuItems.push({ label: "重命名", action: () => handleRenameTable(node) });
-      menuItems.push({ label: "删除表", action: () => handleDropTable(node) });
+      menuItems.push({ label: t("tree.menu.rename"), action: () => handleRenameTable(node) });
+      menuItems.push({ label: t("tree.menu.dropTable"), action: () => handleDropTable(node) });
     }
   }
 
   return (
     <div className="schema-tree">
       <div className="tree-list">{nodes}</div>
-      {nodes.length === 0 && <div className="empty">暂无连接</div>}
+      {nodes.length === 0 && <div className="empty">{t("tree.empty.noConnections")}</div>}
       {status && <div className="tree-status">{status}</div>}
 
       {menu && (

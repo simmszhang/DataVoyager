@@ -1,6 +1,7 @@
 import CodeMirror from "@uiw/react-codemirror";
 import { sql } from "@codemirror/lang-sql";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { useTranslation } from "react-i18next";
 
 interface Props {
   value: string;
@@ -31,36 +32,37 @@ export default function QueryEditor({
   onRollback,
   onToggleAutocommit,
 }: Props) {
+  const { t } = useTranslation();
   return (
     <div className="editor-wrap">
       <div className="editor-toolbar">
         <button className="btn primary" onClick={onRun} disabled={running}>
-          {running ? "执行中…" : "运行 (Ctrl+Enter)"}
+          {running ? t("editor.running") : t("editor.run")}
         </button>
         {running && (
           <button className="btn" onClick={onCancel}>
-            停止
+            {t("editor.stop")}
           </button>
         )}
         <button className="btn" onClick={onExport} disabled={running}>
-          导出
+          {t("editor.export")}
         </button>
         <span className="toolbar-sep" />
         {inTransaction ? (
           <>
             <button className="btn" onClick={onCommit}>
-              提交
+              {t("editor.commit")}
             </button>
             <button className="btn" onClick={onRollback}>
-              回滚
+              {t("editor.rollback")}
             </button>
           </>
         ) : (
           <button className="btn" onClick={onBegin}>
-            开始事务
+            {t("editor.beginTransaction")}
           </button>
         )}
-        <label className="autocommit" title="关闭后需手动提交/回滚">
+        <label className="autocommit" title={t("editor.autocommitTitle")}>
           <input type="checkbox" checked={autocommit} onChange={onToggleAutocommit} />
           autocommit
         </label>

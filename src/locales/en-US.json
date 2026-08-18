@@ -65,5 +65,128 @@
     "confirm": {
       "deleteProject": "Delete this project? Connections under it must be deleted first."
     }
+  },
+  "connection": {
+    "dialog": {
+      "title": "New Connection",
+      "close": "Close",
+      "driver": "Driver",
+      "host": "Host",
+      "port": "Port",
+      "user": "Username",
+      "password": "Password",
+      "databaseOptional": "Database (optional)",
+      "databasePlaceholder": "Default database",
+      "useSsl": "Use SSL/TLS",
+      "verifyCert": "Verify certificate",
+      "useSsh": "Use SSH tunnel",
+      "save": "Save connection",
+      "rememberPassword": "Remember password",
+      "sshHost": "SSH host",
+      "sshPort": "SSH port",
+      "sshUser": "SSH user",
+      "sshPassword": "SSH password",
+      "test": "Test Connection",
+      "testing": "Testing…",
+      "connect": "Connect",
+      "connecting": "Connecting…",
+      "testSuccess": "Connected successfully, server version {{version}}",
+      "fingerprintTitle": "Confirm SSH host fingerprint",
+      "fingerprintBody": "First connection to this SSH host. Verify the SHA-256 host fingerprint below (TOFU):",
+      "fingerprintNote": "The fingerprint will be remembered and verified automatically on future connections.",
+      "cancel": "Cancel",
+      "trustAndTest": "Trust and Test",
+      "trustAndConnect": "Trust and Connect"
+    }
+  },
+  "tree": {
+    "empty": {
+      "noConnections": "No connections"
+    },
+    "renamePrompt": "New table name",
+    "dropDatabaseConfirm": "Delete database \"{{name}}\"? This cannot be undone.",
+    "dropTableConfirm": "Delete table \"{{name}}\"? This cannot be undone.",
+    "menu": {
+      "disconnect": "Disconnect",
+      "createTable": "New Table",
+      "dropDatabase": "Drop Database",
+      "queryData": "Query Data",
+      "rename": "Rename",
+      "dropTable": "Drop Table"
+    }
+  },
+  "editor": {
+    "run": "Run (Ctrl+Enter)",
+    "running": "Running…",
+    "stop": "Stop",
+    "export": "Export",
+    "commit": "Commit",
+    "rollback": "Rollback",
+    "beginTransaction": "Begin Transaction",
+    "autocommitTitle": "When off, commit/rollback manually"
+  },
+  "grid": {
+    "null": "NULL",
+    "rowsReturned": "{{count}} rows returned",
+    "executedAffected": "Statement executed successfully, {{count}} rows affected",
+    "lastInsertId": ", last insert ID: {{id}}",
+    "truncatedSuffix": " (result truncated)",
+    "truncated": "· truncated",
+    "truncatedTitle": "Result set exceeds the per-batch row limit; only received rows are shown",
+    "doubleClickEdit": " · double-click a cell to edit"
+  },
+  "export": {
+    "dialog": {
+      "title": "Export Result",
+      "format": "Format",
+      "formatInsert": "INSERT statements",
+      "targetTable": "Target table name",
+      "tablePlaceholder": "Table name",
+      "exporting": "Exporting…",
+      "generate": "Generate",
+      "copied": "Copied ✓",
+      "copyToClipboard": "Copy to Clipboard"
+    }
+  },
+  "history": {
+    "title": "History",
+    "tab": {
+      "statements": "Statements",
+      "executions": "Executions"
+    },
+    "search": {
+      "placeholder": "Search SQL…"
+    },
+    "loadToEditor": "Load into editor",
+    "pin": "Pin",
+    "copy": "Copy",
+    "delete": "Delete",
+    "empty": "No records"
+  },
+  "createTable": {
+    "dialog": {
+      "title": "New Table ({{database}})",
+      "requireName": "Please enter a table name",
+      "requireColumn": "At least one column is required",
+      "tableName": "Table name",
+      "tableNamePlaceholder": "Table name",
+      "columnName": "Column name",
+      "columnNamePlaceholder": "Column name",
+      "type": "Type",
+      "notNull": "Not null",
+      "primaryKey": "Primary key",
+      "addColumn": "+ Add Column",
+      "cancel": "Cancel",
+      "creating": "Creating…",
+      "create": "Create"
+    }
+  },
+  "schema": {
+    "databases": "Databases",
+    "refresh": "Refresh",
+    "selectDatabase": "Select a database…",
+    "tables": "Tables",
+    "noTables": "No tables",
+    "columns": "Columns"
   }
 }

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   CellValue,
@@ -18,9 +19,10 @@ interface Props {
 }
 
 function Cell({ value }: { value: CellValue }) {
+  const { t } = useTranslation();
   switch (value.t) {
     case "null":
-      return <span className="cell-null">NULL</span>;
+      return <span className="cell-null">{t("grid.null")}</span>;
     case "i64":
     case "u64":
     case "f64":
@@ -69,6 +71,7 @@ interface CellEditorProps {
 /// 编辑态控件：bool → checkbox、json → textarea、numeric → number input、其余 → text input。
 /// 所有控件都以「原始输入串」上抛，由后端 parse_value 按列类型解析（#11/#69）。
 function CellEditor({ kind, text, onChange, onCommit, onCancel }: CellEditorProps) {
+  const { t } = useTranslation();
   if (kind === "bool") {
     return (
       <input
@@ -91,7 +94,7 @@ function CellEditor({ kind, text, onChange, onCommit, onCancel }: CellEditorProp
         autoFocus
         rows={4}
         value={text}
-        placeholder="NULL"
+        placeholder={t("grid.null")}
         onChange={(e) => onChange(e.target.value)}
         onBlur={onCommit}
         onKeyDown={(e) => {
@@ -108,7 +111,7 @@ function CellEditor({ kind, text, onChange, onCommit, onCancel }: CellEditorProp
       step="any"
       autoFocus
       value={text}
-      placeholder="NULL"
+      placeholder={t("grid.null")}
       onChange={(e) => onChange(e.target.value)}
       onBlur={onCommit}
       onKeyDown={(e) => {
@@ -120,6 +123,7 @@ function CellEditor({ kind, text, onChange, onCommit, onCancel }: CellEditorProp
 }
 
 export default function ResultsGrid({ result, onEditCell }: Props) {
+  const { t } = useTranslation();
   const parentRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{ row: number; col: number; text: string } | null>(null);
   const rows = result.columns ? result.rows : [];
@@ -138,9 +142,10 @@ export default function ResultsGrid({ result, onEditCell }: Props) {
   if (!result.columns) {
     return (
       <div className="result-message">
-        语句执行成功，影响 {result.affected_rows} 行
-        {result.last_insert_id != null && `，最后插入 ID: ${result.last_insert_id}`}
-        {result.truncated && "（结果已截断）"}
+        {t("grid.executedAffected", { count: result.affected_rows })}
+        {result.last_insert_id != null &&
+          t("grid.lastInsertId", { id: result.last_insert_id })}
+        {result.truncated && t("grid.truncatedSuffix")}
       </div>
     );
   }
@@ -153,16 +158,16 @@ export default function ResultsGrid({ result, onEditCell }: Props) {
   return (
     <div className="results">
       <div className="result-meta">
-        返回 {rows.length} 行
+        {t("grid.rowsReturned", { count: rows.length })}
         {result.truncated && (
           <span
-            title="结果集超出单组行数上限，仅展示已接收的部分行"
+            title={t("grid.truncatedTitle")}
             style={{ color: "#e0a63c", fontWeight: 600 }}
           >
-            · 结果已截断
+            {t("grid.truncated")}
           </span>
         )}
-        {onEditCell && " · 双击单元格编辑"}
+        {onEditCell && t("grid.doubleClickEdit")}
       </div>
       <div className="grid-wrap" ref={parentRef}>
         <div style={{ minWidth: "100%", width: "max-content" }}>

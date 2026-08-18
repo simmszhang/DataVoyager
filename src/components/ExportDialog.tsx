@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../api";
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function ExportDialog({ connectionId, database, sql, onClose }: Props) {
+  const { t } = useTranslation();
   const [format, setFormat] = useState("csv");
   const [table, setTable] = useState("");
   const [busy, setBusy] = useState(false);
@@ -44,7 +46,7 @@ export default function ExportDialog({ connectionId, database, sql, onClose }: P
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>导出结果</h2>
+          <h2>{t("export.dialog.title")}</h2>
           <button className="icon-btn" onClick={onClose}>
             ✕
           </button>
@@ -52,21 +54,21 @@ export default function ExportDialog({ connectionId, database, sql, onClose }: P
         <div className="modal-body">
           <div className="form-grid">
             <label>
-              <span>格式</span>
+              <span>{t("export.dialog.format")}</span>
               <select value={format} onChange={(e) => setFormat(e.target.value)}>
                 <option value="csv">CSV</option>
                 <option value="json">JSON</option>
                 <option value="markdown">Markdown</option>
-                <option value="insert">INSERT 语句</option>
+                <option value="insert">{t("export.dialog.formatInsert")}</option>
               </select>
             </label>
             {format === "insert" && (
               <label>
-                <span>目标表名</span>
+                <span>{t("export.dialog.targetTable")}</span>
                 <input
                   value={table}
                   onChange={(e) => setTable(e.target.value)}
-                  placeholder="表名"
+                  placeholder={t("export.dialog.tablePlaceholder")}
                 />
               </label>
             )}
@@ -76,10 +78,10 @@ export default function ExportDialog({ connectionId, database, sql, onClose }: P
         </div>
         <div className="modal-footer">
           <button className="btn" onClick={handleExport} disabled={busy}>
-            {busy ? "导出中…" : "生成"}
+            {busy ? t("export.dialog.exporting") : t("export.dialog.generate")}
           </button>
           <button className="btn primary" onClick={handleCopy} disabled={!text}>
-            {copied ? "已复制 ✓" : "复制到剪贴板"}
+            {copied ? t("export.dialog.copied") : t("export.dialog.copyToClipboard")}
           </button>
         </div>
       </div>

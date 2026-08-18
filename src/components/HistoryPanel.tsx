@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, ExecutionRecord, StatementHit } from "../api";
 
 interface Props {
@@ -7,6 +8,7 @@ interface Props {
 }
 
 export default function HistoryPanel({ projectId, onLoadSql }: Props) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<"statements" | "executions">("statements");
   const [query, setQuery] = useState("");
   const [statements, setStatements] = useState<StatementHit[]>([]);
@@ -62,25 +64,25 @@ export default function HistoryPanel({ projectId, onLoadSql }: Props) {
   return (
     <div className="history-panel">
       <div className="history-head">
-        <span className="section-title">历史</span>
+        <span className="section-title">{t("history.title")}</span>
         <div className="history-tabs">
           <button
             className={tab === "statements" ? "active" : ""}
             onClick={() => setTab("statements")}
           >
-            语句库
+            {t("history.tab.statements")}
           </button>
           <button
             className={tab === "executions" ? "active" : ""}
             onClick={() => setTab("executions")}
           >
-            执行流水
+            {t("history.tab.executions")}
           </button>
         </div>
         {tab === "statements" && (
           <input
             className="history-search"
-            placeholder="搜索 SQL…"
+            placeholder={t("history.search.placeholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && refreshStatements()}
@@ -98,15 +100,19 @@ export default function HistoryPanel({ projectId, onLoadSql }: Props) {
                   {s.sql}
                 </div>
                 <span className="history-meta">×{s.run_count}</span>
-                <button className="icon-btn" title="载入编辑器" onClick={() => onLoadSql(s.sql)}>
+                <button
+                  className="icon-btn"
+                  title={t("history.loadToEditor")}
+                  onClick={() => onLoadSql(s.sql)}
+                >
                   ↩
                 </button>
-                <button className="icon-btn" title="固定" onClick={() => togglePin(s)}>
+                <button className="icon-btn" title={t("history.pin")} onClick={() => togglePin(s)}>
                   {s.pinned ? "★" : "☆"}
                 </button>
                 <button
                   className="icon-btn"
-                  title="复制"
+                  title={t("history.copy")}
                   onClick={() => navigator.clipboard.writeText(s.sql)}
                 >
                   ⧉
@@ -123,7 +129,7 @@ export default function HistoryPanel({ projectId, onLoadSql }: Props) {
                 </span>
                 <button
                   className="icon-btn"
-                  title="删除"
+                  title={t("history.delete")}
                   onClick={() => handleDeleteExecution(e.id)}
                 >
                   🗑
@@ -131,7 +137,7 @@ export default function HistoryPanel({ projectId, onLoadSql }: Props) {
               </div>
             ))}
         {(tab === "statements" ? statements : executions).length === 0 && !loading && (
-          <div className="empty">暂无记录</div>
+          <div className="empty">{t("history.empty")}</div>
         )}
       </div>
     </div>

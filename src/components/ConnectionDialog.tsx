@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, ConnectParams, DriverInfo } from "../api";
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function ConnectionDialog({ drivers, projectId, onConnected, onClose }: Props) {
+  const { t } = useTranslation();
   const [form, setForm] = useState({
     driver: drivers[0]?.id ?? "mysql",
     host: "127.0.0.1",
@@ -90,7 +92,7 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
       const ready = await ensureFingerprint(p, "test");
       if (!ready) return; // 等待指纹确认
       const version = await api.testConnection(ready);
-      setMessage({ ok: true, text: `连接成功，服务器版本 ${version}` });
+      setMessage({ ok: true, text: t("connection.dialog.testSuccess", { version }) });
     } catch (e) {
       setMessage({ ok: false, text: String(e) });
     } finally {
@@ -129,7 +131,7 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
     try {
       if (mode === "test") {
         const version = await api.testConnection(ready);
-        setMessage({ ok: true, text: `连接成功，服务器版本 ${version}` });
+        setMessage({ ok: true, text: t("connection.dialog.testSuccess", { version }) });
       } else {
         await api.connect(ready, projectId, form.save, form.rememberPassword);
         onConnected();
@@ -145,8 +147,8 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>新建连接</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="关闭">
+          <h2>{t("connection.dialog.title")}</h2>
+          <button className="icon-btn" onClick={onClose} aria-label={t("connection.dialog.close")}>
             ✕
           </button>
         </div>
@@ -154,7 +156,7 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
         <div className="modal-body">
           <div className="form-grid">
             <label>
-              <span>驱动</span>
+              <span>{t("connection.dialog.driver")}</span>
               <select value={form.driver} onChange={set("driver")}>
                 {drivers.map((d) => (
                   <option key={d.id} value={d.id}>
@@ -164,43 +166,47 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
               </select>
             </label>
             <label>
-              <span>主机</span>
+              <span>{t("connection.dialog.host")}</span>
               <input value={form.host} onChange={set("host")} placeholder="127.0.0.1" />
             </label>
             <label>
-              <span>端口</span>
+              <span>{t("connection.dialog.port")}</span>
               <input value={form.port} onChange={set("port")} placeholder="3306" />
             </label>
             <label>
-              <span>用户名</span>
+              <span>{t("connection.dialog.user")}</span>
               <input value={form.user} onChange={set("user")} placeholder="root" />
             </label>
             <label>
-              <span>密码</span>
+              <span>{t("connection.dialog.password")}</span>
               <input type="password" value={form.password} onChange={set("password")} />
             </label>
             <label>
-              <span>数据库（可选）</span>
-              <input value={form.database} onChange={set("database")} placeholder="默认数据库" />
+              <span>{t("connection.dialog.databaseOptional")}</span>
+              <input
+                value={form.database}
+                onChange={set("database")}
+                placeholder={t("connection.dialog.databasePlaceholder")}
+              />
             </label>
             <div className="span-2 checkbox-row">
               <label className="checkbox">
                 <input type="checkbox" checked={form.ssl} onChange={setBool("ssl")} />
-                <span>使用 SSL/TLS</span>
+                <span>{t("connection.dialog.useSsl")}</span>
               </label>
               {form.ssl && (
                 <label className="checkbox">
                   <input type="checkbox" checked={form.verifyCert} onChange={setBool("verifyCert")} />
-                  <span>校验证书</span>
+                  <span>{t("connection.dialog.verifyCert")}</span>
                 </label>
               )}
               <label className="checkbox">
                 <input type="checkbox" checked={form.ssh} onChange={setBool("ssh")} />
-                <span>使用 SSH 隧道</span>
+                <span>{t("connection.dialog.useSsh")}</span>
               </label>
               <label className="checkbox">
                 <input type="checkbox" checked={form.save} onChange={setBool("save")} />
-                <span>保存连接</span>
+                <span>{t("connection.dialog.save")}</span>
               </label>
               <label className="checkbox">
                 <input
@@ -208,25 +214,25 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
                   checked={form.rememberPassword}
                   onChange={setBool("rememberPassword")}
                 />
-                <span>记住密码</span>
+                <span>{t("connection.dialog.rememberPassword")}</span>
               </label>
             </div>
             {form.ssh && (
               <>
                 <label>
-                  <span>SSH 主机</span>
+                  <span>{t("connection.dialog.sshHost")}</span>
                   <input value={form.sshHost} onChange={set("sshHost")} placeholder="ssh.example.com" />
                 </label>
                 <label>
-                  <span>SSH 端口</span>
+                  <span>{t("connection.dialog.sshPort")}</span>
                   <input value={form.sshPort} onChange={set("sshPort")} placeholder="22" />
                 </label>
                 <label>
-                  <span>SSH 用户</span>
+                  <span>{t("connection.dialog.sshUser")}</span>
                   <input value={form.sshUser} onChange={set("sshUser")} placeholder="user" />
                 </label>
                 <label>
-                  <span>SSH 密码</span>
+                  <span>{t("connection.dialog.sshPassword")}</span>
                   <input type="password" value={form.sshPassword} onChange={set("sshPassword")} />
                 </label>
               </>
@@ -240,10 +246,10 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
 
         <div className="modal-footer">
           <button className="btn" onClick={handleTest} disabled={busy !== null}>
-            {busy === "test" ? "测试中…" : "测试连接"}
+            {busy === "test" ? t("connection.dialog.testing") : t("connection.dialog.test")}
           </button>
           <button className="btn primary" onClick={handleConnect} disabled={busy !== null}>
-            {busy === "connect" ? "连接中…" : "连接"}
+            {busy === "connect" ? t("connection.dialog.connecting") : t("connection.dialog.connect")}
           </button>
         </div>
       </div>
@@ -252,28 +258,30 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
         <div className="modal-backdrop" onClick={(e) => e.stopPropagation()}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>确认 SSH 主机指纹</h2>
+              <h2>{t("connection.dialog.fingerprintTitle")}</h2>
               <button
                 className="icon-btn"
                 onClick={() => setPendingFingerprint(null)}
-                aria-label="关闭"
+                aria-label={t("connection.dialog.close")}
               >
                 ✕
               </button>
             </div>
             <div className="modal-body">
-              <p className="danger-hint">
-                首次连接该 SSH 主机，请核对以下 SHA-256 主机指纹（TOFU）：
-              </p>
+              <p className="danger-hint">{t("connection.dialog.fingerprintBody")}</p>
               <pre className="danger-sql">{pendingFingerprint.fp}</pre>
-              <p className="muted">确认后将记住该指纹，后续连接自动校验。</p>
+              <p className="muted">{t("connection.dialog.fingerprintNote")}</p>
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setPendingFingerprint(null)}>
-                取消
+                {t("connection.dialog.cancel")}
               </button>
               <button className="btn primary" onClick={confirmFingerprint}>
-                信任并{pendingFingerprint.mode === "test" ? "测试" : "连接"}
+                {t(
+                  pendingFingerprint.mode === "test"
+                    ? "connection.dialog.trustAndTest"
+                    : "connection.dialog.trustAndConnect",
+                )}
               </button>
             </div>
           </div>

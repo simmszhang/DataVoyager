@@ -65,5 +65,128 @@
     "confirm": {
       "deleteProject": "删除该项目？项目下连接需先删除。"
     }
+  },
+  "connection": {
+    "dialog": {
+      "title": "新建连接",
+      "close": "关闭",
+      "driver": "驱动",
+      "host": "主机",
+      "port": "端口",
+      "user": "用户名",
+      "password": "密码",
+      "databaseOptional": "数据库（可选）",
+      "databasePlaceholder": "默认数据库",
+      "useSsl": "使用 SSL/TLS",
+      "verifyCert": "校验证书",
+      "useSsh": "使用 SSH 隧道",
+      "save": "保存连接",
+      "rememberPassword": "记住密码",
+      "sshHost": "SSH 主机",
+      "sshPort": "SSH 端口",
+      "sshUser": "SSH 用户",
+      "sshPassword": "SSH 密码",
+      "test": "测试连接",
+      "testing": "测试中…",
+      "connect": "连接",
+      "connecting": "连接中…",
+      "testSuccess": "连接成功，服务器版本 {{version}}",
+      "fingerprintTitle": "确认 SSH 主机指纹",
+      "fingerprintBody": "首次连接该 SSH 主机，请核对以下 SHA-256 主机指纹（TOFU）：",
+      "fingerprintNote": "确认后将记住该指纹，后续连接自动校验。",
+      "cancel": "取消",
+      "trustAndTest": "信任并测试",
+      "trustAndConnect": "信任并连接"
+    }
+  },
+  "tree": {
+    "empty": {
+      "noConnections": "暂无连接"
+    },
+    "renamePrompt": "新表名",
+    "dropDatabaseConfirm": "确定删除数据库「{{name}}」？此操作不可撤销。",
+    "dropTableConfirm": "确定删除表「{{name}}」？此操作不可撤销。",
+    "menu": {
+      "disconnect": "断开连接",
+      "createTable": "新建表",
+      "dropDatabase": "删除数据库",
+      "queryData": "查询数据",
+      "rename": "重命名",
+      "dropTable": "删除表"
+    }
+  },
+  "editor": {
+    "run": "运行 (Ctrl+Enter)",
+    "running": "执行中…",
+    "stop": "停止",
+    "export": "导出",
+    "commit": "提交",
+    "rollback": "回滚",
+    "beginTransaction": "开始事务",
+    "autocommitTitle": "关闭后需手动提交/回滚"
+  },
+  "grid": {
+    "null": "NULL",
+    "rowsReturned": "返回 {{count}} 行",
+    "executedAffected": "语句执行成功，影响 {{count}} 行",
+    "lastInsertId": "，最后插入 ID: {{id}}",
+    "truncatedSuffix": "（结果已截断）",
+    "truncated": "· 结果已截断",
+    "truncatedTitle": "结果集超出单组行数上限，仅展示已接收的部分行",
+    "doubleClickEdit": " · 双击单元格编辑"
+  },
+  "export": {
+    "dialog": {
+      "title": "导出结果",
+      "format": "格式",
+      "formatInsert": "INSERT 语句",
+      "targetTable": "目标表名",
+      "tablePlaceholder": "表名",
+      "exporting": "导出中…",
+      "generate": "生成",
+      "copied": "已复制 ✓",
+      "copyToClipboard": "复制到剪贴板"
+    }
+  },
+  "history": {
+    "title": "历史",
+    "tab": {
+      "statements": "语句库",
+      "executions": "执行流水"
+    },
+    "search": {
+      "placeholder": "搜索 SQL…"
+    },
+    "loadToEditor": "载入编辑器",
+    "pin": "固定",
+    "copy": "复制",
+    "delete": "删除",
+    "empty": "暂无记录"
+  },
+  "createTable": {
+    "dialog": {
+      "title": "新建表（{{database}}）",
+      "requireName": "请输入表名",
+      "requireColumn": "至少需要一个列",
+      "tableName": "表名",
+      "tableNamePlaceholder": "表名",
+      "columnName": "列名",
+      "columnNamePlaceholder": "列名",
+      "type": "类型",
+      "notNull": "非空",
+      "primaryKey": "主键",
+      "addColumn": "+ 添加列",
+      "cancel": "取消",
+      "creating": "创建中…",
+      "create": "创建"
+    }
+  },
+  "schema": {
+    "databases": "数据库",
+    "refresh": "刷新",
+    "selectDatabase": "选择数据库…",
+    "tables": "表",
+    "noTables": "没有表",
+    "columns": "列"
   }
 }

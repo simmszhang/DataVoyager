@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, ColumnDef } from "../api";
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function CreateTableDialog({ connId, database, onDone, onClose }: Props) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [cols, setCols] = useState<ColumnDef[]>([
     { name: "", type_name: "VARCHAR(255)", nullable: true, primary_key: false },
@@ -30,22 +32,22 @@ export default function CreateTableDialog({ connId, database, onDone, onClose }:
   }
 
   async function handleCreate() {
-    const t = name.trim();
-    if (!t) {
-      setError("请输入表名");
+    const tableName = name.trim();
+    if (!tableName) {
+      setError(t("createTable.dialog.requireName"));
       return;
     }
     const valid = cols
       .filter((c) => c.name.trim())
       .map((c) => ({ ...c, name: c.name.trim() }));
     if (valid.length === 0) {
-      setError("至少需要一个列");
+      setError(t("createTable.dialog.requireColumn"));
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      await api.createTable(connId, database, t, valid);
+      await api.createTable(connId, database, tableName, valid);
       onDone();
     } catch (e) {
       setError(String(e));
@@ -58,22 +60,28 @@ export default function CreateTableDialog({ connId, database, onDone, onClose }:
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>新建表（{database}）</h2>
+          <h2>{t("createTable.dialog.title", { database })}</h2>
           <button className="icon-btn" onClick={onClose}>
             ✕
           </button>
         </div>
         <div className="modal-body">
           <label className="form-field">
-            <span>表名</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="表名" />
+            <span>{t("createTable.dialog.tableName")}</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t("createTable.dialog.tableNamePlaceholder")}
+            />
           </label>
           <div className="col-defs">
             <div className="col-def-head">
-              <span>列名</span>
-              <span>类型</span>
-              <span title="非空">非空</span>
-              <span title="主键">主键</span>
+              <span>{t("createTable.dialog.columnName")}</span>
+              <span>{t("createTable.dialog.type")}</span>
+              <span title={t("createTable.dialog.notNull")}>{t("createTable.dialog.notNull")}</span>
+              <span title={t("createTable.dialog.primaryKey")}>
+                {t("createTable.dialog.primaryKey")}
+              </span>
               <span />
             </div>
             {cols.map((c, i) => (
@@ -81,7 +89,7 @@ export default function CreateTableDialog({ connId, database, onDone, onClose }:
                 <input
                   value={c.name}
                   onChange={(e) => updateCol(i, { name: e.target.value })}
-                  placeholder="列名"
+                  placeholder={t("createTable.dialog.columnNamePlaceholder")}
                 />
                 <input
                   value={c.type_name}
@@ -104,17 +112,17 @@ export default function CreateTableDialog({ connId, database, onDone, onClose }:
               </div>
             ))}
             <button className="btn small" onClick={addCol}>
-              + 添加列
+              {t("createTable.dialog.addColumn")}
             </button>
           </div>
           {error && <div className="form-message err">{error}</div>}
         </div>
         <div className="modal-footer">
           <button className="btn" onClick={onClose}>
-            取消
+            {t("createTable.dialog.cancel")}
           </button>
           <button className="btn primary" onClick={handleCreate} disabled={busy}>
-            {busy ? "创建中…" : "创建"}
+            {busy ? t("createTable.dialog.creating") : t("createTable.dialog.create")}
           </button>
         </div>
       </div>

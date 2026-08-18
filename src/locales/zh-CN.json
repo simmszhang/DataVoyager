@@ -1,7 +1,69 @@
 {
   "app": {
     "empty": {
-      "noConnection": "未连接数据库"
+      "noConnection": "未连接数据库",
+      "noSavedConnections": "无已保存连接",
+      "selectTableOrRun": "选择一个表或输入 SQL 后点击「运行」"
+    },
+    "status": {
+      "connected": "已连接 {{name}}（{{version}}）",
+      "tableSqlFailed": "生成表浏览 SQL 失败",
+      "rowsReturned": "返回 {{count}} 行",
+      "rowsAffected": "影响 {{count}} 行",
+      "cancelledAutoReconnect": "已取消，连接将自动重连",
+      "queryFailed": "查询失败",
+      "committed": "已提交",
+      "rolledBack": "已回滚",
+      "needSelectTable": "需先选择表",
+      "noPkEditable": "该表无主键，无法编辑",
+      "updated": "已更新",
+      "ready": "就绪",
+      "notConnected": "未连接",
+      "inTransaction": "● 事务中",
+      "counts": "{{drivers}} 个驱动 · {{projects}} 个项目 · {{connections}} 个连接"
+    },
+    "action": {
+      "newConnection": "+ 新建连接",
+      "disconnect": "断开",
+      "newProject": "新建项目",
+      "rename": "重命名",
+      "delete": "删除",
+      "connect": "连接",
+      "history": "历史"
+    },
+    "sidebar": {
+      "projects": "项目",
+      "connections": "连接",
+      "saved": "已保存"
+    },
+    "welcome": {
+      "title": "dby — 轻量级跨平台数据库客户端",
+      "subtitle": "点击「新建连接」开始，第一版支持 MySQL。"
+    },
+    "editConfirm": {
+      "title": "确认数据修改",
+      "body": "将执行以下 SQL：",
+      "cancel": "取消",
+      "confirm": "确认执行"
+    },
+    "dangerConfirm": {
+      "title": "危险操作确认",
+      "body": "以下 SQL 可能破坏数据，请确认后执行：",
+      "cancel": "取消",
+      "confirm": "确认执行"
+    },
+    "warnConfirm": {
+      "title": "确认执行",
+      "body": "缺少 WHERE，可能影响大量行，请确认后执行：",
+      "cancel": "取消",
+      "confirm": "仍要执行"
+    },
+    "prompt": {
+      "projectName": "项目名称",
+      "renameProject": "新名称"
+    },
+    "confirm": {
+      "deleteProject": "删除该项目？项目下连接需先删除。"
     }
   }
 }

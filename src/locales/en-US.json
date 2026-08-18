@@ -1,7 +1,69 @@
 {
   "app": {
     "empty": {
-      "noConnection": "No database connection"
+      "noConnection": "No database connection",
+      "noSavedConnections": "No saved connections",
+      "selectTableOrRun": "Select a table or enter SQL, then click Run"
+    },
+    "status": {
+      "connected": "Connected {{name}} ({{version}})",
+      "tableSqlFailed": "Failed to generate table browse SQL",
+      "rowsReturned": "{{count}} rows returned",
+      "rowsAffected": "{{count}} rows affected",
+      "cancelledAutoReconnect": "Cancelled; the connection will auto-reconnect",
+      "queryFailed": "Query failed",
+      "committed": "Committed",
+      "rolledBack": "Rolled back",
+      "needSelectTable": "Select a table first",
+      "noPkEditable": "This table has no primary key and cannot be edited",
+      "updated": "Updated",
+      "ready": "Ready",
+      "notConnected": "Not connected",
+      "inTransaction": "● In transaction",
+      "counts": "{{drivers}} drivers · {{projects}} projects · {{connections}} connections"
+    },
+    "action": {
+      "newConnection": "+ New Connection",
+      "disconnect": "Disconnect",
+      "newProject": "New Project",
+      "rename": "Rename",
+      "delete": "Delete",
+      "connect": "Connect",
+      "history": "History"
+    },
+    "sidebar": {
+      "projects": "Projects",
+      "connections": "Connections",
+      "saved": "Saved"
+    },
+    "welcome": {
+      "title": "dby — Lightweight cross-platform database client",
+      "subtitle": "Click New Connection to get started. MySQL is supported in v1."
+    },
+    "editConfirm": {
+      "title": "Confirm Data Edit",
+      "body": "The following SQL will be executed:",
+      "cancel": "Cancel",
+      "confirm": "Confirm"
+    },
+    "dangerConfirm": {
+      "title": "Dangerous Operation Confirmation",
+      "body": "The following SQL may damage data. Confirm before executing:",
+      "cancel": "Cancel",
+      "confirm": "Confirm"
+    },
+    "warnConfirm": {
+      "title": "Confirm Execution",
+      "body": "Missing WHERE clause; this may affect many rows. Confirm before executing:",
+      "cancel": "Cancel",
+      "confirm": "Execute Anyway"
+    },
+    "prompt": {
+      "projectName": "Project name",
+      "renameProject": "New name"
+    },
+    "confirm": {
+      "deleteProject": "Delete this project? Connections under it must be deleted first."
     }
   }
 }

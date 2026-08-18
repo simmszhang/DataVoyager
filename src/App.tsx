@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Channel } from "@tauri-apps/api/core";
 import {
   api,
@@ -35,6 +36,8 @@ export default function App() {
     updateWorkspace,
     mutateResult,
   } = useStore();
+
+  const { t } = useTranslation();
 
   const [drivers, setDrivers] = useState<DriverInfo[]>([]);
   const [showDialog, setShowDialog] = useState(false);
@@ -87,7 +90,7 @@ export default function App() {
     const newest = list[list.length - 1];
     if (!newest) return;
     openConnection(newest);
-    setStatus(`已连接 ${newest.name}（${newest.server_version}）`);
+    setStatus(t("app.status.connected", { name: newest.name, version: newest.server_version }));
     if (newest.database) {
       updateWorkspace(newest.id, { selectedDb: newest.database });
     }
@@ -138,7 +141,7 @@ export default function App() {
       updateWorkspace(connId, { query: sql });
     } catch (e) {
       updateWorkspace(connId, { error: String(e) });
-      setStatus("生成表浏览 SQL 失败");
+      setStatus(t("app.status.tableSqlFailed"));
     }
   }
 
@@ -192,7 +195,9 @@ export default function App() {
           const r = useStore.getState().workspaces[id]?.result;
           if (r) {
             setStatus(
-              r.columns ? `返回 ${r.rows.length} 行` : `影响 ${r.affected_rows} 行`
+              r.columns
+                ? t("app.status.rowsReturned", { count: r.rows.length })
+                : t("app.status.rowsAffected", { count: r.affected_rows })
             );
           }
           break;
@@ -218,7 +223,7 @@ export default function App() {
       // running 兜底复位（design §7）：channel 终止事件可能先于 invoke 拒绝到达，重复复位无害。
       const cancelled = msg.includes("cancelled");
       updateWorkspace(id, { error: cancelled ? null : msg, running: false });
-      setStatus(cancelled ? "已取消，连接将自动重连" : "查询失败");
+      setStatus(cancelled ? t("app.status.cancelledAutoReconnect") : t("app.status.queryFailed"));
     }
   }
 
@@ -265,7 +270,7 @@ export default function App() {
     try {
       await api.commit(activeId);
       updateWorkspace(activeId, { inTransaction: false });
-      setStatus("已提交");
+      setStatus(t("app.status.committed"));
     } catch (e) {
       updateWorkspace(activeId, { error: String(e) });
     }
@@ -276,7 +281,7 @@ export default function App() {
     try {
       await api.rollback(activeId);
       updateWorkspace(activeId, { inTransaction: false });
-      setStatus("已回滚");
+      setStatus(t("app.status.rolledBack"));
     } catch (e) {
       updateWorkspace(activeId, { error: String(e) });
     }
@@ -298,14 +303,14 @@ export default function App() {
     const table = ws.selectedTable;
     const rs = ws.result;
     if (!table || !rs || !rs.columns) {
-      setStatus("需先选择表");
+      setStatus(t("app.status.needSelectTable"));
       return;
     }
     const cols = rs.columns;
     const row = rs.rows[rowIndex];
     const pkCols = cols.filter((c) => c.primary_key).map((c) => c.name);
     if (pkCols.length === 0) {
-      setStatus("该表无主键，无法编辑");
+      setStatus(t("app.status.noPkEditable"));
       return;
     }
     // pk 与 set 都提交「列名 + 列类型 + 原始输入串」，由后端 parse_value 按列类型
@@ -336,7 +341,7 @@ export default function App() {
     setPendingEdit(null);
     try {
       await api.executeEdit(activeId, database, table, pk, set);
-      setStatus("已更新");
+      setStatus(t("app.status.updated"));
       const sql = workspaces[activeId]?.query;
       if (sql) runQuery(activeId, sql);
     } catch (e) {
@@ -355,7 +360,7 @@ export default function App() {
   }
 
   async function handleCreateProject() {
-    const name = window.prompt("项目名称");
+    const name = window.prompt(t("app.prompt.projectName"));
     if (!name) return;
     try {
       const p = await api.createProject(name);
@@ -368,7 +373,7 @@ export default function App() {
   async function handleRenameProject() {
     if (!projectId) return;
     const current = projects.find((p) => p.id === projectId);
-    const name = window.prompt("新名称", current?.name);
+    const name = window.prompt(t("app.prompt.renameProject"), current?.name);
     if (!name) return;
     try {
       await api.renameProject(projectId, name);
@@ -380,7 +385,7 @@ export default function App() {
 
   async function handleDeleteProject() {
     if (!projectId) return;
-    if (!window.confirm("删除该项目？项目下连接需先删除。")) return;
+    if (!window.confirm(t("app.confirm.deleteProject"))) return;
     try {
       await api.deleteProject(projectId, true);
       await refreshProjects();
@@ -431,16 +436,16 @@ export default function App() {
               {activeConn.database && <span className="conn-db">{activeConn.database}</span>}
             </>
           ) : (
-            <span className="muted">未连接</span>
+            <span className="muted">{t("app.status.notConnected")}</span>
           )}
         </div>
         <div className="topbar-actions">
           <button className="btn" onClick={() => setShowDialog(true)}>
-            + 新建连接
+            {t("app.action.newConnection")}
           </button>
           {activeConn && (
             <button className="btn" onClick={() => handleDisconnect(activeConn.id)}>
-              断开
+              {t("app.action.disconnect")}
             </button>
           )}
         </div>
@@ -475,16 +480,16 @@ export default function App() {
       <div className="body">
         <aside className="sidebar">
           <div className="sidebar-head">
-            <span className="section-title">项目</span>
+            <span className="section-title">{t("app.sidebar.projects")}</span>
             <div className="project-actions">
-              <button className="btn small" onClick={handleCreateProject} title="新建项目">
+              <button className="btn small" onClick={handleCreateProject} title={t("app.action.newProject")}>
                 +
               </button>
               <button
                 className="btn small"
                 onClick={handleRenameProject}
                 disabled={!projectId}
-                title="重命名"
+                title={t("app.action.rename")}
               >
                 ✎
               </button>
@@ -492,7 +497,7 @@ export default function App() {
                 className="btn small"
                 onClick={handleDeleteProject}
                 disabled={!projectId || projects.length <= 1}
-                title="删除"
+                title={t("app.action.delete")}
               >
                 🗑
               </button>
@@ -511,7 +516,7 @@ export default function App() {
           </select>
 
           <div className="sidebar-head">
-            <span className="section-title">连接</span>
+            <span className="section-title">{t("app.sidebar.connections")}</span>
             <button className="btn small" onClick={() => setShowDialog(true)}>
               +
             </button>
@@ -525,7 +530,7 @@ export default function App() {
           />
 
           <div className="sidebar-head">
-            <span className="section-title">已保存</span>
+            <span className="section-title">{t("app.sidebar.saved")}</span>
           </div>
           <div className="conn-list">
             {savedConnections
@@ -536,12 +541,12 @@ export default function App() {
                   <span className="ellipsis" title={`${c.user}@${c.host}:${c.port}`}>
                     {c.name}
                   </span>
-                  <button className="icon-btn" title="连接" onClick={() => handleReconnect(c.id)}>
+                  <button className="icon-btn" title={t("app.action.connect")} onClick={() => handleReconnect(c.id)}>
                     ↻
                   </button>
                   <button
                     className="icon-btn"
-                    title="删除"
+                    title={t("app.action.delete")}
                     onClick={() => handleDeleteSaved(c.id)}
                   >
                     🗑
@@ -549,7 +554,7 @@ export default function App() {
                 </div>
               ))}
             {savedConnections.filter((c) => c.project_id === projectId).length === 0 && (
-              <div className="empty">无已保存连接</div>
+              <div className="empty">{t("app.empty.noSavedConnections")}</div>
             )}
           </div>
         </aside>
@@ -577,14 +582,14 @@ export default function App() {
                 ) : ws.result ? (
                   <ResultsGrid result={ws.result} onEditCell={handleEditCell} />
                 ) : (
-                  <div className="empty-state">选择一个表或输入 SQL 后点击「运行」</div>
+                  <div className="empty-state">{t("app.empty.selectTableOrRun")}</div>
                 )}
               </section>
             </>
           ) : (
             <div className="empty-state">
-              <h2>dby — 轻量级跨平台数据库客户端</h2>
-              <p>点击「新建连接」开始，第一版支持 MySQL。</p>
+              <h2>{t("app.welcome.title")}</h2>
+              <p>{t("app.welcome.subtitle")}</p>
             </div>
           )}
           {showHistory && (
@@ -598,13 +603,17 @@ export default function App() {
 
       <footer className="statusbar">
         <button className="btn small" onClick={() => setShowHistory((v) => !v)}>
-          历史
+          {t("app.action.history")}
         </button>
-        {ws?.inTransaction && <span className="txn-indicator">● 事务中</span>}
-        <span className="status">{status ?? "就绪"}</span>
+        {ws?.inTransaction && <span className="txn-indicator">{t("app.status.inTransaction")}</span>}
+        <span className="status">{status ?? t("app.status.ready")}</span>
         <span className="spacer" />
         <span>
-          {drivers.length} 个驱动 · {projects.length} 个项目 · {connections.length} 个连接
+          {t("app.status.counts", {
+            drivers: drivers.length,
+            projects: projects.length,
+            connections: connections.length,
+          })}
         </span>
       </footer>
 
@@ -630,21 +639,21 @@ export default function App() {
         <div className="modal-backdrop" onClick={() => setPendingEdit(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>确认数据修改</h2>
+              <h2>{t("app.editConfirm.title")}</h2>
               <button className="icon-btn" onClick={() => setPendingEdit(null)}>
                 ✕
               </button>
             </div>
             <div className="modal-body">
-              <p className="danger-hint">将执行以下 SQL：</p>
+              <p className="danger-hint">{t("app.editConfirm.body")}</p>
               <pre className="danger-sql">{pendingEdit.sql}</pre>
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setPendingEdit(null)}>
-                取消
+                {t("app.editConfirm.cancel")}
               </button>
               <button className="btn primary" onClick={confirmEdit}>
-                确认执行
+                {t("app.editConfirm.confirm")}
               </button>
             </div>
           </div>
@@ -655,13 +664,13 @@ export default function App() {
         <div className="modal-backdrop" onClick={() => setPendingDanger(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>危险操作确认</h2>
+              <h2>{t("app.dangerConfirm.title")}</h2>
               <button className="icon-btn" onClick={() => setPendingDanger(null)}>
                 ✕
               </button>
             </div>
             <div className="modal-body">
-              <p className="danger-hint">以下 SQL 可能破坏数据，请确认后执行：</p>
+              <p className="danger-hint">{t("app.dangerConfirm.body")}</p>
               <pre className="danger-sql">{pendingDanger.sql}</pre>
               <ul className="danger-reasons">
                 {pendingDanger.reasons.map((r) => (
@@ -671,7 +680,7 @@ export default function App() {
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setPendingDanger(null)}>
-                取消
+                {t("app.dangerConfirm.cancel")}
               </button>
               <button
                 className="btn danger"
@@ -681,7 +690,7 @@ export default function App() {
                   if (activeId) runQuery(activeId, sql, true);
                 }}
               >
-                确认执行
+                {t("app.dangerConfirm.confirm")}
               </button>
             </div>
           </div>
@@ -692,18 +701,18 @@ export default function App() {
         <div className="modal-backdrop" onClick={() => setPendingWarn(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>确认执行</h2>
+              <h2>{t("app.warnConfirm.title")}</h2>
               <button className="icon-btn" onClick={() => setPendingWarn(null)}>
                 ✕
               </button>
             </div>
             <div className="modal-body">
-              <p className="danger-hint">缺少 WHERE，可能影响大量行，请确认后执行：</p>
+              <p className="danger-hint">{t("app.warnConfirm.body")}</p>
               <pre className="danger-sql">{pendingWarn.sql}</pre>
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setPendingWarn(null)}>
-                取消
+                {t("app.warnConfirm.cancel")}
               </button>
               <button
                 className="btn primary"
@@ -713,7 +722,7 @@ export default function App() {
                   if (activeId) runQuery(activeId, sql);
                 }}
               >
-                仍要执行
+                {t("app.warnConfirm.confirm")}
               </button>
             </div>
           </div>

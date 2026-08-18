@@ -45,6 +45,7 @@ export default function App() {
     sql: string;
     reasons: string[];
   } | null>(null);
+  const [pendingWarn, setPendingWarn] = useState<{ sql: string } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
   const [pendingEdit, setPendingEdit] = useState<{
@@ -190,6 +191,10 @@ export default function App() {
       const danger = await api.analyzeDanger(sql);
       if (danger.level === "dangerous") {
         setPendingDanger({ sql, reasons: danger.reasons });
+        return;
+      }
+      if (danger.level === "warn") {
+        setPendingWarn({ sql });
         return;
       }
       await runQuery(activeId, sql);
@@ -631,6 +636,38 @@ export default function App() {
                 }}
               >
                 确认执行
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingWarn && (
+        <div className="modal-backdrop" onClick={() => setPendingWarn(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>确认执行</h2>
+              <button className="icon-btn" onClick={() => setPendingWarn(null)}>
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="danger-hint">缺少 WHERE，可能影响大量行，请确认后执行：</p>
+              <pre className="danger-sql">{pendingWarn.sql}</pre>
+            </div>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setPendingWarn(null)}>
+                取消
+              </button>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  const sql = pendingWarn.sql;
+                  setPendingWarn(null);
+                  if (activeId) runQuery(activeId, sql);
+                }}
+              >
+                仍要执行
               </button>
             </div>
           </div>

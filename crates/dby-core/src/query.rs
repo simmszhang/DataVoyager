@@ -153,12 +153,19 @@ impl Default for CancellationToken {
     }
 }
 
-/// 缓冲收集 sink：把流式事件收集成一个 `QueryOutput`（带行数截断）。
-pub struct CollectingSink {
-    columns: Option<Vec<ColumnInfo>>,
+/// 当前结果集构建器（缓冲路径内部状态）。
+struct ResultSetBuilder {
+    columns: Vec<ColumnInfo>,
     rows: Vec<Vec<Value>>,
-    max_rows: usize,
     truncated: bool,
+}
+
+/// 缓冲收集 sink：把流式事件收集成一个 `QueryOutput`（带行数截断、多结果集分桶）。
+pub struct CollectingSink {
+    result_sets: Vec<ResultSet>,
+    current: Option<ResultSetBuilder>,
+    max_rows: usize,
+    /// 顶层值 = 最后一个结果集的值（MySQL 多语句语义）。
     affected_rows: u64,
     last_insert_id: Option<u64>,
     info: Option<String>,
@@ -167,27 +174,30 @@ pub struct CollectingSink {
 impl CollectingSink {
     pub fn new(max_rows: Option<usize>) -> Self {
         Self {
-            columns: None,
-            rows: Vec::new(),
+            result_sets: Vec::new(),
+            current: None,
             max_rows: max_rows.unwrap_or(usize::MAX),
-            truncated: false,
             affected_rows: 0,
             last_insert_id: None,
             info: None,
         }
     }
 
-    pub fn into_output(self) -> QueryOutput {
-        let result_sets = match self.columns {
-            Some(cols) => vec![ResultSet {
-                columns: cols,
-                rows: self.rows,
-                truncated: self.truncated,
-            }],
-            None => vec![],
-        };
+    /// 结算当前构建器为一个 `ResultSet` 并移入 `result_sets`（无当前构建器时为空操作）。
+    fn settle_current(&mut self) {
+        if let Some(cur) = self.current.take() {
+            self.result_sets.push(ResultSet {
+                columns: cur.columns,
+                rows: cur.rows,
+                truncated: cur.truncated,
+            });
+        }
+    }
+
+    pub fn into_output(mut self) -> QueryOutput {
+        self.settle_current();
         QueryOutput {
-            result_sets,
+            result_sets: self.result_sets,
             affected_rows: self.affected_rows,
             last_insert_id: self.last_insert_id,
             info: self.info,
@@ -198,13 +208,24 @@ impl CollectingSink {
 impl ResultSink for CollectingSink {
     fn on_event(&mut self, ev: StreamEvent) {
         match ev {
-            StreamEvent::Columns(cols) => self.columns = Some(cols),
+            StreamEvent::Columns(cols) => {
+                self.settle_current();
+                self.current = Some(ResultSetBuilder {
+                    columns: cols,
+                    rows: Vec::new(),
+                    truncated: false,
+                });
+            }
             StreamEvent::Rows(rows) => {
+                let current = match self.current.as_mut() {
+                    Some(cur) => cur,
+                    None => return, // 无列头的行事件忽略
+                };
                 for r in rows {
-                    if self.rows.len() < self.max_rows {
-                        self.rows.push(r);
+                    if current.rows.len() < self.max_rows {
+                        current.rows.push(r);
                     } else {
-                        self.truncated = true;
+                        current.truncated = true;
                     }
                 }
             }
@@ -216,9 +237,13 @@ impl ResultSink for CollectingSink {
                 self.last_insert_id = last_insert_id;
             }
             StreamEvent::Info(info) => self.info = info,
-            // 边界/终止事件：Task 2（#28）按 design §4.2 分桶结算，此处暂不消费。
-            StreamEvent::ResultSetEnd | StreamEvent::Truncated | StreamEvent::Done => {}
-            StreamEvent::Error { .. } => {}
+            StreamEvent::ResultSetEnd => self.settle_current(),
+            StreamEvent::Truncated => {
+                if let Some(cur) = self.current.as_mut() {
+                    cur.truncated = true;
+                }
+            }
+            StreamEvent::Done | StreamEvent::Error { .. } => {} // 终态：缓冲路径无需处理
         }
     }
 }
@@ -281,6 +306,33 @@ mod tests {
         let rs = out.first_result_set().unwrap();
         assert_eq!(rs.rows.len(), 2);
         assert!(rs.truncated);
+    }
+
+    /// 构造一个最小 `ColumnInfo`（测试辅助）。
+    fn col(name: &str) -> ColumnInfo {
+        ColumnInfo {
+            name: name.into(),
+            type_name: "int".into(),
+            column_type: None,
+            nullable: None,
+            primary_key: None,
+            default: None,
+            comment: None,
+        }
+    }
+
+    #[test]
+    fn collecting_sink_buckets_multiple_result_sets() {
+        let mut sink = CollectingSink::new(Some(100));
+        sink.on_event(StreamEvent::Columns(vec![col("a")]));
+        sink.on_event(StreamEvent::Rows(vec![vec![Value::I64(1)]]));
+        sink.on_event(StreamEvent::ResultSetEnd);
+        sink.on_event(StreamEvent::Columns(vec![col("b")]));
+        sink.on_event(StreamEvent::Rows(vec![vec![Value::I64(2)]]));
+        let out = sink.into_output();
+        assert_eq!(out.result_sets.len(), 2);
+        assert_eq!(out.result_sets[0].columns[0].name, "a");
+        assert_eq!(out.result_sets[1].columns[0].name, "b");
     }
 
     #[test]

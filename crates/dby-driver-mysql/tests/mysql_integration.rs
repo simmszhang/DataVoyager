@@ -648,7 +648,8 @@ async fn consecutive_dml_yields_both_affected() {
         "DML must not emit Columns/result sets"
     );
 
-    // 两条 UPDATE 都在服务端生效（多语句语义），顺序验证。
+    // 两条 UPDATE 都在服务端生效（多语句语义）：第二条 `WHERE id IN (1,2)` 会把 id=1 也改回 2，
+    // 故最终两行都是 x=2（若第二条未被消费，顶层 affected_rows 会停留 1，前面断言已拦截）。
     let check = execute_buffered(
         conn.as_mut(),
         Some("dby_test"),
@@ -658,7 +659,7 @@ async fn consecutive_dml_yields_both_affected() {
     .await
     .unwrap();
     let rs = check.first_result_set().unwrap();
-    assert_eq!(rs.rows[0][0].to_display_string(), "1");
+    assert_eq!(rs.rows[0][0].to_display_string(), "2");
     assert_eq!(rs.rows[1][0].to_display_string(), "2");
 
     execute_buffered(

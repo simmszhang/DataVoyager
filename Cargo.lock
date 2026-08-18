@@ -856,6 +856,7 @@ dependencies = [
  "dby-core",
  "dby-driver-mysql",
  "keyring",
+ "log",
  "serde",
  "serde_json",
  "tauri",

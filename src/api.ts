@@ -222,8 +222,12 @@ export const api = {
   probeHostKey: (params: ConnectParams) =>
     invoke<string>("probe_host_key", { params }),
 
-  connect: (params: ConnectParams, projectId?: string | null) =>
-    invoke<ConnectResponse>("connect", { params, projectId }),
+  connect: (
+    params: ConnectParams,
+    projectId?: string | null,
+    save: boolean = true,
+    rememberPassword: boolean = true,
+  ) => invoke<ConnectResponse>("connect", { params, projectId, save, rememberPassword }),
   disconnect: (id: number) => invoke<void>("disconnect", { id }),
   listConnections: () => invoke<ConnectionSummary[]>("list_connections"),
   listSavedConnections: (projectId?: string | null) =>

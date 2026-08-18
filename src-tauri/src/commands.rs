@@ -15,7 +15,7 @@ use dby_core::project::Project;
 use dby_core::query::{ExecOpts, QueryOutput, ResultSink, SqlOrigin, StreamEvent};
 use tauri::ipc::Channel;
 
-use crate::secrets::{delete_secret, get_secret, set_secret};
+use crate::secrets::{delete_secret, get_secret, secret_key, set_secret, SecretKind};
 use crate::state::{ActiveConnection, AppState};
 
 #[derive(Serialize)]
@@ -104,16 +104,17 @@ pub async fn connect(
     state: State<'_, Arc<AppState>>,
     params: ConnectParams,
     project_id: Option<String>,
+    save: bool,
+    remember_password: bool,
 ) -> Result<ConnectResponse> {
     let project_id = state.resolve_project_id(project_id).await;
     let name = auto_name(&params);
     let resp = open_session(state.inner(), &params, project_id.clone(), name.clone()).await?;
 
-    // 持久化连接配置 + 密码进钥匙串
-    let config_id = uuid::Uuid::new_v4().to_string();
+    // 先建会话，再按 save/remember_password 决定是否持久化（#6/#43）。
     let config = ConnectionConfig {
-        id: config_id.clone(),
-        project_id: project_id.clone(),
+        id: uuid::Uuid::new_v4().to_string(),
+        project_id,
         name,
         driver: params.driver.clone(),
         host: params.host.clone(),
@@ -123,18 +124,128 @@ pub async fn connect(
         ssl: params.ssl.clone(),
         ssh: params.ssh.clone(),
         color: None,
+        params: params.params.clone(),
     };
-    {
-        let mut cfg = state.config.lock().await;
-        cfg.connections.push(config);
-        cfg.save(&state.config_path)?;
+    persist_connection(
+        state.inner(),
+        resp.id,
+        config,
+        &params,
+        save,
+        remember_password,
+        SecretsIo {
+            store: store_secrets,
+            delete: delete_secrets,
+        },
+    )
+    .await?;
+    Ok(resp)
+}
+
+/// 钥匙串读写单元：`store_secrets` / `delete_secrets` 的注入点。
+/// `keyring::Entry` 无法直接 mock，单测传入 fake 以断言「save=false 不写」。
+struct SecretsIo {
+    store: fn(&str, &ConnectParams) -> Result<()>,
+    delete: fn(&str),
+}
+
+/// 连接成功后的持久化控制流（#6/#43）：
+///
+/// - `save=false`：不写 config、不写 keyring（no-op）。
+/// - `save=true`：secrets 先存（`remember_password` 时）、config 后存；任一步失败都回滚已写内容并断开会话，不留半失败态。
+///
+/// `secrets` 是钥匙串读写单元，真实实现为 `store_secrets` / `delete_secrets`。
+async fn persist_connection(
+    state: &Arc<AppState>,
+    resp_id: u64,
+    config: ConnectionConfig,
+    params: &ConnectParams,
+    save: bool,
+    remember_password: bool,
+    secrets: SecretsIo,
+) -> Result<()> {
+    if !save {
+        return Ok(());
     }
-    if let Some(pw) = &params.password {
-        if !pw.is_empty() {
-            let _ = set_secret(&config_id, pw); // 钥匙串失败不阻断连接
+    let config_id = config.id.clone();
+    // secrets 先存、config 后存：避免「config 已存但 secret 缺失」半失败态
+    if remember_password {
+        if let Err(e) = (secrets.store)(&config_id, params) {
+            state.connections.lock().await.remove(&resp_id); // 断开不留孤儿；未存 config，可安全失败
+            return Err(e);
         }
     }
-    Ok(resp)
+    if let Err(e) = persist_config(state, config).await {
+        // config 保存失败：回滚已存 secrets + 断开（不留半失败态）
+        if remember_password {
+            (secrets.delete)(&config_id);
+        }
+        state.connections.lock().await.remove(&resp_id);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// 把连接配置追加到内存并落盘；save 失败回滚内存 push（不留幽灵配置），
+/// 并映射为 `DbError::Storage`（非静默，#39/#43）。
+async fn persist_config(state: &Arc<AppState>, config: ConnectionConfig) -> Result<()> {
+    let mut cfg = state.config.lock().await;
+    let id = config.id.clone();
+    cfg.connections.push(config);
+    cfg.save(&state.config_path).map_err(|e| {
+        cfg.connections.retain(|c| c.id != id);
+        DbError::Storage(format!("保存连接配置失败: {e}"))
+    })
+}
+
+/// 把连接参数里的敏感值写入钥匙串三键：
+/// `{config_id}`（MySQL 密码）、`{config_id}:ssh`（SSH 密码）、`{config_id}:ssh_key`（SSH 私钥）。
+/// None/空串跳过不写；写失败 `log::warn!` + 返回 `DbError::Storage`（非静默，#39）。
+fn store_secrets(config_id: &str, params: &ConnectParams) -> Result<()> {
+    if let Some(pw) = params.password.as_deref() {
+        if !pw.is_empty() {
+            let key = secret_key(config_id, SecretKind::MysqlPassword);
+            if let Err(e) = set_secret(&key, pw) {
+                log::warn!("写入钥匙串条目 {key} 失败: {e}");
+                return Err(DbError::Storage(format!("保存 MySQL 密码失败: {e}")));
+            }
+        }
+    }
+    if let Some(ssh) = &params.ssh {
+        if let Some(pw) = ssh.password.as_deref() {
+            if !pw.is_empty() {
+                let key = secret_key(config_id, SecretKind::SshPassword);
+                if let Err(e) = set_secret(&key, pw) {
+                    log::warn!("写入钥匙串条目 {key} 失败: {e}");
+                    return Err(DbError::Storage(format!("保存 SSH 密码失败: {e}")));
+                }
+            }
+        }
+        if let Some(key_data) = ssh.private_key.as_deref() {
+            if !key_data.is_empty() {
+                let key = secret_key(config_id, SecretKind::SshPrivateKey);
+                if let Err(e) = set_secret(&key, key_data) {
+                    log::warn!("写入钥匙串条目 {key} 失败: {e}");
+                    return Err(DbError::Storage(format!("保存 SSH 私钥失败: {e}")));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 删除三键（回滚/级联清理用）；best-effort，单键失败仅 `log::warn!`。
+fn delete_secrets(config_id: &str) {
+    for (kind, label) in [
+        (SecretKind::MysqlPassword, "MySQL 密码"),
+        (SecretKind::SshPassword, "SSH 密码"),
+        (SecretKind::SshPrivateKey, "SSH 私钥"),
+    ] {
+        let key = secret_key(config_id, kind);
+        if let Err(e) = delete_secret(&key) {
+            log::warn!("删除钥匙串条目 {key}（{label}）失败: {e}");
+        }
+    }
 }
 
 /// 打开会话（连接 + 建 ActiveConnection），返回响应。
@@ -921,5 +1032,72 @@ mod tests {
         assert!(guard_dangerous("DROP TABLE t", true).is_ok());
         assert!(guard_dangerous("SELECT 1", false).is_ok());
         assert!(guard_dangerous("UPDATE t SET x=1", false).is_ok()); // Warn 非 Dangerous，走前端提示
+    }
+
+    /// `save=false` 时必须完全跳过持久化：不写 config、不写 keyring（#6/#43）。
+    /// keyring 无法直接 mock，故注入 fake `store`/`delete`，断言二者均不被调用。
+    #[tokio::test]
+    async fn connect_save_false_writes_nothing() {
+        let state = Arc::new(AppState::new(
+            dby_core::config::AppConfig::with_default_project(),
+            dby_core::history::HistoryStore::open_in_memory().unwrap(),
+            std::path::PathBuf::from("unused-config.json"),
+        ));
+        let params = ConnectParams {
+            driver: "mysql".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 3306,
+            user: "root".to_string(),
+            password: Some("mysql-pw".to_string()),
+            database: None,
+            ssl: None,
+            ssh: Some(dby_core::driver::SshOptions {
+                enabled: true,
+                host: "ssh.example.com".to_string(),
+                user: "ubuntu".to_string(),
+                password: Some("ssh-pw".to_string()),
+                private_key: Some("ssh-key".to_string()),
+                ..Default::default()
+            }),
+            params: std::collections::HashMap::new(),
+        };
+        let config = ConnectionConfig {
+            id: "cfg-1".to_string(),
+            project_id: "p1".to_string(),
+            name: "demo".to_string(),
+            driver: "mysql".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 3306,
+            user: "root".to_string(),
+            database: None,
+            ssl: None,
+            ssh: None,
+            color: None,
+            params: std::collections::HashMap::new(),
+        };
+
+        let result = persist_connection(
+            &state,
+            42,
+            config,
+            &params,
+            false, // save=false：不持久化
+            true,  // remember_password 无意义（save=false 短路）
+            SecretsIo {
+                store: |_, _| panic!("save=false 时不得调用 keyring 写入"),
+                delete: |_| panic!("save=false 时不得调用 keyring 删除"),
+            },
+        )
+        .await;
+
+        assert!(result.is_ok(), "save=false 应直接成功: {result:?}");
+        assert!(
+            state.config.lock().await.connections.is_empty(),
+            "save=false 不得写入 config"
+        );
+        assert!(
+            state.connections.lock().await.is_empty(),
+            "save=false 不得产生活跃连接残留"
+        );
     }
 }

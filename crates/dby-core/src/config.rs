@@ -2,6 +2,7 @@
 //!
 //! 密码/私钥不落此文件，存 OS 钥匙串（由壳层实现）；这里只存引用与配置元数据。
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,9 @@ pub struct ConnectionConfig {
     pub ssh: Option<SshOptions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// 驱动特定参数（重连回填，非敏感）
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub params: HashMap<String, String>,
 }
 
 impl ConnectionConfig {
@@ -43,6 +47,7 @@ impl ConnectionConfig {
             ssl: None,
             ssh: None,
             color: None,
+            params: HashMap::new(),
         }
     }
 }

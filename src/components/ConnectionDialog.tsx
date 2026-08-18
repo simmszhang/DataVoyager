@@ -24,6 +24,8 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
     sshUser: "",
     sshPassword: "",
     sshFingerprint: "",
+    save: true,
+    rememberPassword: true,
   });
   const [busy, setBusy] = useState<null | "test" | "connect">(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -62,7 +64,8 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
     });
 
   const setBool =
-    (key: "ssl" | "verifyCert" | "ssh") => (e: React.ChangeEvent<HTMLInputElement>) =>
+    (key: "ssl" | "verifyCert" | "ssh" | "save" | "rememberPassword") =>
+    (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((f) => ({ ...f, [key]: e.target.checked }));
 
   /// 前置 TOFU：SSH 开启且尚无已信任指纹时，先探针取指纹，弹窗确认后由
@@ -102,7 +105,7 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
       const p = params();
       const ready = await ensureFingerprint(p, "connect");
       if (!ready) return; // 等待指纹确认
-      await api.connect(ready, projectId);
+      await api.connect(ready, projectId, form.save, form.rememberPassword);
       onConnected();
     } catch (e) {
       setMessage({ ok: false, text: String(e) });
@@ -128,7 +131,7 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
         const version = await api.testConnection(ready);
         setMessage({ ok: true, text: `连接成功，服务器版本 ${version}` });
       } else {
-        await api.connect(ready, projectId);
+        await api.connect(ready, projectId, form.save, form.rememberPassword);
         onConnected();
       }
     } catch (e) {
@@ -194,6 +197,18 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
               <label className="checkbox">
                 <input type="checkbox" checked={form.ssh} onChange={setBool("ssh")} />
                 <span>使用 SSH 隧道</span>
+              </label>
+              <label className="checkbox">
+                <input type="checkbox" checked={form.save} onChange={setBool("save")} />
+                <span>保存连接</span>
+              </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.rememberPassword}
+                  onChange={setBool("rememberPassword")}
+                />
+                <span>记住密码</span>
               </label>
             </div>
             {form.ssh && (

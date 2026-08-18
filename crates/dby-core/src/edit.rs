@@ -110,7 +110,8 @@ fn build_where(dialect: &dyn Dialect, pk: &[(String, Value)]) -> String {
 
 /// 按列类型把编辑输入串解析为 `Value`（design §4.6，#11/#69）。
 ///
-/// - Bool 仅认 `"true"/"1"` 与 `"false"/"0"`；
+/// - `"NULL"`（大小写不敏感，trim 后）→ `Value::Null`（SQL NULL，旧前端启发式行为）；
+/// - Bool：`"true"/"1"`→true、`"false"/"0"`→false；非 0/1 回退整数（与读路径 conv.rs 一致，不坍缩）；
 /// - 整型/浮点按对应宽度解析；Decimal 保留原串；Bytes 取 UTF-8 字节；
 /// - Date/Time/DateTime 校验格式后产出类型化值（不再产出未校验的 Str）；
 /// - Json 走 `serde_json`；Str/Uuid/Array/Map/Unknown 原样收为 `Value::Str`。
@@ -118,11 +119,24 @@ fn build_where(dialect: &dyn Dialect, pk: &[(String, Value)]) -> String {
 /// 解析失败统一 `DbError::Other("无法将 '<input>' 解析为 <type>")`。
 pub fn parse_value(input: &str, ct: &ColumnType) -> Result<Value> {
     let t = input.trim();
+    // 输入 "NULL"（大小写不敏感）→ SQL NULL，与旧前端启发式一致（§4.6 未列，非禁止）。
+    // `quote_value` 已把 `Value::Null` 渲染为 "NULL"，与 build_update 组合正确。
+    if t.eq_ignore_ascii_case("NULL") {
+        return Ok(Value::Null);
+    }
     match &ct.base {
         ColumnTypeBase::Bool => match t {
             "true" | "1" => Ok(Value::Bool(true)),
             "false" | "0" => Ok(Value::Bool(false)),
-            _ => Err(parse_err(t, ct.base)),
+            // 与读路径 conv.rs 一致：TINYINT(1) 非 0/1 回退整数，不坍缩为 Bool
+            _ if ct.unsigned => t
+                .parse::<u64>()
+                .map(Value::U64)
+                .map_err(|_| parse_err(t, ct.base)),
+            _ => t
+                .parse::<i64>()
+                .map(Value::I64)
+                .map_err(|_| parse_err(t, ct.base)),
         },
         ColumnTypeBase::I8 | ColumnTypeBase::I16 | ColumnTypeBase::I32 | ColumnTypeBase::I64 => t
             .parse::<i64>()
@@ -316,6 +330,8 @@ mod tests {
         };
         assert_eq!(parse_value("42", &i64ct).unwrap(), Value::I64(42));
         assert!(parse_value("abc", &i64ct).is_err());
+        // 评审（Important）：输入 "NULL" → SQL NULL（旧前端启发式行为），不报解析错误
+        assert_eq!(parse_value("NULL", &i64ct).unwrap(), Value::Null);
         let decct = ColumnType {
             base: ColumnTypeBase::Decimal,
             ..Default::default()
@@ -355,7 +371,27 @@ mod tests {
         assert_eq!(parse_value("1", &boolct).unwrap(), Value::Bool(true));
         assert_eq!(parse_value("false", &boolct).unwrap(), Value::Bool(false));
         assert_eq!(parse_value("0", &boolct).unwrap(), Value::Bool(false));
-        assert!(parse_value("2", &boolct).is_err());
+        // TINYINT(1) 非 0/1：与读路径 conv.rs 一致回退整数，不坍缩为 Bool（评审 Minor 顺手修复）
+        assert_eq!(parse_value("2", &boolct).unwrap(), Value::I64(2));
+        let ubool = ColumnType {
+            base: ColumnTypeBase::Bool,
+            unsigned: true,
+            ..Default::default()
+        };
+        assert_eq!(parse_value("2", &ubool).unwrap(), Value::U64(2));
+        assert!(parse_value("abc", &boolct).is_err());
+
+        // NULL 输入大小写不敏感、trim 后生效，Str 列同样产出 SQL NULL（评审 Important）
+        let i64ct = ColumnType {
+            base: ColumnTypeBase::I64,
+            ..Default::default()
+        };
+        let str_ct = ColumnType {
+            base: ColumnTypeBase::Str,
+            ..Default::default()
+        };
+        assert_eq!(parse_value("null", &i64ct).unwrap(), Value::Null);
+        assert_eq!(parse_value(" Null ", &str_ct).unwrap(), Value::Null);
 
         let u64ct = ColumnType {
             base: ColumnTypeBase::U64,
@@ -409,10 +445,6 @@ mod tests {
             Value::Bytes(b"hi".to_vec())
         );
 
-        let str_ct = ColumnType {
-            base: ColumnTypeBase::Str,
-            ..Default::default()
-        };
         assert_eq!(parse_value("x", &str_ct).unwrap(), Value::Str("x".into()));
 
         let uuid_ct = ColumnType {
@@ -431,10 +463,6 @@ mod tests {
         );
 
         // 错误消息统一为「无法将 '<input>' 解析为 <type>」
-        let i64ct = ColumnType {
-            base: ColumnTypeBase::I64,
-            ..Default::default()
-        };
         let err = parse_value("abc", &i64ct).unwrap_err();
         assert_eq!(err.to_string(), "无法将 'abc' 解析为 i64");
     }

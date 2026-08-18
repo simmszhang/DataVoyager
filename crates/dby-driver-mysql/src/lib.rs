@@ -497,7 +497,7 @@ async fn run_query_stream(
                 // （空列集 next() 也会推进到下一集，连续 DML 不丢第二集）
                 sink.on_event(StreamEvent::Affected {
                     affected_rows: qr.affected_rows(),
-                    last_insert_id: qr.last_insert_id(),
+                    last_insert_id: qr.last_insert_id().map(|v| v.to_string()),
                 });
                 let _ = qr.next().await.map_err(db_err)?;
             }

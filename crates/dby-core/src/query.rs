@@ -86,7 +86,7 @@ pub struct ResultSet {
 pub struct QueryOutput {
     pub result_sets: Vec<ResultSet>,
     pub affected_rows: u64,
-    pub last_insert_id: Option<u64>,
+    pub last_insert_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub info: Option<String>,
 }
@@ -105,7 +105,7 @@ pub enum StreamEvent {
     Rows(Vec<Vec<Value>>),
     Affected {
         affected_rows: u64,
-        last_insert_id: Option<u64>,
+        last_insert_id: Option<String>,
     },
     Info(Option<String>),
     ResultSetEnd, // 结果集边界
@@ -179,7 +179,7 @@ pub struct CollectingSink {
     max_rows: usize,
     /// 顶层值 = 最后一个结果集的值（MySQL 多语句语义）。
     affected_rows: u64,
-    last_insert_id: Option<u64>,
+    last_insert_id: Option<String>,
     info: Option<String>,
 }
 

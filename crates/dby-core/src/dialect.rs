@@ -14,10 +14,16 @@ pub trait Dialect: Send + Sync {
     fn parse_column_type(&self, raw: &str) -> Option<ColumnType>;
     /// 结构化列类型 → 展示名（由 `ColumnInfo.type_name` 消费，不再依赖 Debug 字符串）。
     fn display_type_name(&self, ct: &ColumnType) -> String;
+    /// 按方言规则切分语句（默认实现 = `generic_split_statements` 的通用切分）。
+    /// 未来 Postgres 等驱动可覆盖以支持 dollar-quoting 等方言差异。
+    fn split_statements<'a>(&self, sql: &'a str) -> Vec<&'a str> {
+        generic_split_statements(sql)
+    }
 }
 
-/// 朴素但正确的语句切分：在单/双引号、反引号、行注释、块注释之外按 `;` 切分。
-pub fn split_statements(sql: &str) -> Vec<&str> {
+/// 方言无关的通用语句切分：在单/双引号、反引号、行注释、块注释之外按 `;` 切分。
+/// 供 [`Dialect::split_statements`] 默认实现与自由函数 [`split_statements`] 共用。
+fn generic_split_statements(sql: &str) -> Vec<&str> {
     let bytes = sql.as_bytes();
     let mut out = Vec::new();
     let mut start = 0usize;
@@ -115,6 +121,13 @@ pub fn split_statements(sql: &str) -> Vec<&str> {
     out
 }
 
+/// 朴素但正确的语句切分：在单/双引号、反引号、行注释、块注释之外按 `;` 切分。
+/// 薄封装：委托 `generic_split_statements`，与 trait 默认方法同源，
+/// 供 `danger.rs` 等既有调用点继续使用。
+pub fn split_statements(sql: &str) -> Vec<&str> {
+    generic_split_statements(sql)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +176,18 @@ mod tests {
     fn split_handles_single_statement() {
         assert_eq!(split_statements("SELECT 1"), vec!["SELECT 1"]);
         assert_eq!(split_statements(""), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn dialect_split_statements_default_matches_free_fn() {
+        assert_eq!(
+            TestDialect.split_statements("SELECT 'a;b'; SELECT 1"),
+            vec!["SELECT 'a;b'", "SELECT 1"]
+        );
+        assert_eq!(
+            split_statements("SELECT 'a;b'; SELECT 1"),
+            vec!["SELECT 'a;b'", "SELECT 1"]
+        ); // 薄封装同源
     }
 
     #[test]

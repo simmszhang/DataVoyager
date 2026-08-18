@@ -9,6 +9,15 @@ fn ssh_err(e: russh::Error) -> DbError {
     DbError::Other(e.to_string())
 }
 
+/// 计算 SSH 主机公钥的 OpenSSH 风格 SHA-256 指纹（`SHA256:<无 padding base64>`）。
+///
+/// TOFU 任务 2/3（`ProbeHandler`/`ClientHandler`）将调用本函数校验主机密钥；
+/// 在此之前生产代码暂无调用点，故允许 dead_code，后续任务可移除该属性。
+#[allow(dead_code)]
+pub fn fingerprint(key: &russh::keys::PublicKey) -> String {
+    key.fingerprint(russh::keys::HashAlg::Sha256).to_string()
+}
+
 /// 客户端 handler：M1 spike 接受任意主机密钥（M2 做指纹确认）。
 struct ClientHandler;
 
@@ -89,4 +98,26 @@ pub async fn start_tunnel(
         _handle: handle,
         _task: task,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 固定 Ed25519 公钥（与 russh 自带测试同一把密钥），指纹由
+    /// `ssh-keygen -lf` 实测：SHA256:ldyiXa1JQakitNU5tErauu8DvWQ1dZ7aXu+rm7KQuog
+    const TEST_PUBLIC_KEY: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILagOJFgwaMNhBWQINinKOXmqS4Gh5NgxgriXwdOoINJ";
+
+    #[test]
+    fn fingerprint_matches_openssh_form() {
+        let key = russh::keys::PublicKey::from_openssh(TEST_PUBLIC_KEY)
+            .expect("fixed test key must parse");
+        let fp = fingerprint(&key);
+        // 与 `ssh-keygen -lf` 输出逐字符一致
+        assert_eq!(fp, "SHA256:ldyiXa1JQakitNU5tErauu8DvWQ1dZ7aXu+rm7KQuog");
+        assert!(fp.starts_with("SHA256:"));
+        // SHA-256 无 padding base64 = 43 字符
+        assert_eq!(fp.len(), "SHA256:".len() + 43);
+    }
 }

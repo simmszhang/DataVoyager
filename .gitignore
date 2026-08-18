@@ -26,3 +26,6 @@ target
 *.njsproj
 *.sln
 *.sw?
+
+# Git worktrees (isolated implementation workspaces)
+.worktrees/

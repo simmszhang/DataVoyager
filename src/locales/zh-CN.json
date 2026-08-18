@@ -1,0 +1,7 @@
+{
+  "app": {
+    "empty": {
+      "noConnection": "未连接数据库"
+    }
+  }
+}

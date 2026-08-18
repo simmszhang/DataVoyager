@@ -221,6 +221,7 @@ impl Connection for MysqlConnection {
     }
 
     async fn indexes(&mut self, schema: &str, table: &str) -> Result<Vec<IndexInfo>> {
+        // 非参数化例外：SHOW INDEX 不支持占位符；标识符已 quote_identifier 转义
         let sql = format!(
             "SHOW INDEX FROM {} FROM {}",
             MysqlDialect.quote_identifier(table),
@@ -326,6 +327,7 @@ impl Connection for MysqlConnection {
     }
 
     async fn table_ddl(&mut self, schema: &str, table: &str) -> Result<String> {
+        // 非参数化例外：SHOW CREATE TABLE 不支持占位符；标识符已 quote_identifier 转义
         let sql = format!(
             "SHOW CREATE TABLE {}.{}",
             MysqlDialect.quote_identifier(schema),

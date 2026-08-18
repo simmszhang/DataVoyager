@@ -5,7 +5,7 @@
 
 use dby_core::driver::{execute_buffered, ConnectParams, Driver};
 use dby_core::error::DbError;
-use dby_core::query::{CancellationToken, ExecOpts, ResultSink, StreamEvent};
+use dby_core::query::{CancellationToken, CollectingSink, ExecOpts, ResultSink, StreamEvent};
 use dby_driver_mysql::MysqlDriver;
 
 fn env(name: &str, default: &str) -> String {
@@ -104,7 +104,10 @@ async fn metadata_crud_transaction() {
     )
     .await
     .unwrap();
-    assert_eq!(out.first_result_set().unwrap().rows[0][0].to_display_string(), "1");
+    assert_eq!(
+        out.first_result_set().unwrap().rows[0][0].to_display_string(),
+        "1"
+    );
 
     // 事务：提交
     conn.begin().await.unwrap();
@@ -125,11 +128,19 @@ async fn metadata_crud_transaction() {
     )
     .await
     .unwrap();
-    assert_eq!(out.first_result_set().unwrap().rows[0][0].to_display_string(), "2");
+    assert_eq!(
+        out.first_result_set().unwrap().rows[0][0].to_display_string(),
+        "2"
+    );
 
-    execute_buffered(conn.as_mut(), Some("dby_test"), "DROP TABLE dby_it", &ExecOpts::default())
-        .await
-        .unwrap();
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "DROP TABLE dby_it",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -238,9 +249,97 @@ async fn streaming_cancel_and_reuse() {
         "expected cancellation, got {res:?}"
     );
     // 取消后连接可复用
-    conn.ping().await.expect("connection should be reusable after cancel");
+    conn.ping()
+        .await
+        .expect("connection should be reusable after cancel");
     let out = execute_buffered(conn.as_mut(), None, "SELECT 1 AS one", &ExecOpts::default())
         .await
         .unwrap();
-    assert_eq!(out.first_result_set().unwrap().rows[0][0].to_display_string(), "1");
+    assert_eq!(
+        out.first_result_set().unwrap().rows[0][0].to_display_string(),
+        "1"
+    );
+}
+
+/// #33：元数据路径（columns()）与查询结果路径（execute_stream()）的列类型必须一致。
+///
+/// 历史缺陷：同一列在两条路径分别报 `int`/`MYSQL_TYPE_LONG`（base 不一致），
+/// R6 后 unsigned 整数两路径均取 U 族。建表含 int unsigned / decimal(10,2) /
+/// datetime(6) / tinyint(1)，分别走两条路径，断言 `column_type.base` 与
+/// `unsigned` 一致（设计 §4.3「统一」定义），并回归 type_name 不再 int vs long。
+#[tokio::test]
+#[ignore = "requires MySQL; see deploy/database/README.md"]
+async fn metadata_and_query_result_type_names_agree() {
+    use dby_core::metadata::ColumnTypeBase as B;
+
+    let driver = MysqlDriver;
+    let mut conn = driver.connect(&params()).await.expect("connect failed");
+
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "DROP TABLE IF EXISTS dby_tt",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "CREATE TABLE dby_tt (\
+         a INT UNSIGNED, \
+         b DECIMAL(10,2), \
+         c DATETIME(6), \
+         d TINYINT(1))",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+
+    // 元数据路径
+    let meta = conn.columns("dby_test", "dby_tt").await.unwrap();
+    assert_eq!(meta.len(), 4);
+
+    // 查询结果路径
+    let mut sink = CollectingSink::new(None);
+    conn.execute_stream(
+        Some("dby_test"),
+        "SELECT a, b, c, d FROM dby_tt",
+        &ExecOpts::default(),
+        &mut sink,
+    )
+    .await
+    .unwrap();
+    let output = sink.into_output();
+    let query = &output.first_result_set().unwrap().columns;
+    assert_eq!(query.len(), 4);
+
+    // base 与 unsigned 跨路径一致（不再 int vs long 不一致）
+    for (m, q) in meta.iter().zip(query) {
+        let mt = m.column_type.as_ref().expect("metadata column_type");
+        let qt = q.column_type.as_ref().expect("query column_type");
+        assert_eq!(mt.base, qt.base, "base mismatch for {}", m.name);
+        assert_eq!(mt.unsigned, qt.unsigned, "unsigned mismatch for {}", m.name);
+    }
+
+    // R6：int unsigned → U 族（而非 I32 + 标志），type_name 同源生成
+    assert_eq!(meta[0].column_type.as_ref().unwrap().base, B::U32);
+    assert!(meta[0].column_type.as_ref().unwrap().unsigned);
+    assert_eq!(meta[0].type_name, "int unsigned");
+    assert_eq!(query[0].type_name, "int unsigned");
+
+    // decimal / datetime / tinyint(1) 的 base 断言（R6 不涉及的列保持原映射）
+    assert_eq!(meta[1].column_type.as_ref().unwrap().base, B::Decimal);
+    assert_eq!(meta[2].column_type.as_ref().unwrap().base, B::DateTime);
+    assert_eq!(meta[3].column_type.as_ref().unwrap().base, B::Bool);
+    assert!(!meta[3].column_type.as_ref().unwrap().unsigned);
+
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "DROP TABLE dby_tt",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
 }

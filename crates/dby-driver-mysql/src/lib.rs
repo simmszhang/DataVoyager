@@ -135,20 +135,53 @@ impl Connection for MysqlConnection {
     }
 
     async fn columns(&mut self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>> {
-        let sql = "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, COLUMN_COMMENT \
+        // 元数据路径：#33 解析 COLUMN_TYPE 得结构化 column_type，type_name 同源生成；
+        // 附加字段补充 parse_column_type 从字符串取不到的 charset/collation 名与长度/精度。
+        let sql = "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, COLUMN_COMMENT, \
+                   NUMERIC_PRECISION, NUMERIC_SCALE, DATETIME_PRECISION, CHARACTER_MAXIMUM_LENGTH, \
+                   CHARACTER_SET_NAME, COLLATION_NAME \
                    FROM information_schema.COLUMNS \
                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION";
         let rows: Vec<Row> = self.conn.exec(sql, (schema, table)).await.map_err(db_err)?;
         Ok(rows
             .into_iter()
-            .map(|r| ColumnInfo {
-                name: conv::row_string(&r, 0).unwrap_or_default(),
-                type_name: conv::row_string(&r, 1).unwrap_or_default(),
-                column_type: None,
-                nullable: conv::row_string(&r, 2).map(|v| v == "YES"),
-                primary_key: conv::row_string(&r, 3).map(|v| v == "PRI"),
-                default: conv::row_string(&r, 4),
-                comment: conv::row_string(&r, 5),
+            .map(|r| {
+                let raw_type = conv::row_string(&r, 1).unwrap_or_default();
+                let parsed = MysqlDialect.parse_column_type(&raw_type);
+                let mut ct = parsed.clone().unwrap_or_else(ColumnType::unknown);
+                // information_schema 补充 parse 取不到的字段
+                if ct.numeric_precision.is_none() {
+                    ct.numeric_precision = conv::row_u32(&r, 6);
+                }
+                if ct.numeric_scale.is_none() {
+                    ct.numeric_scale = conv::row_u32(&r, 7);
+                }
+                if ct.temporal_precision.is_none() {
+                    ct.temporal_precision = conv::row_u32(&r, 8);
+                }
+                if ct.char_max_length.is_none() {
+                    ct.char_max_length = conv::row_u32(&r, 9);
+                }
+                if ct.charset.is_none() {
+                    ct.charset = conv::row_string(&r, 10);
+                }
+                if ct.collation.is_none() {
+                    ct.collation = conv::row_string(&r, 11);
+                }
+                ColumnInfo {
+                    name: conv::row_string(&r, 0).unwrap_or_default(),
+                    type_name: if parsed.is_some() {
+                        MysqlDialect.display_type_name(&ct)
+                    } else {
+                        // parse 失败（COLUMN_TYPE 为空等）：回退原文
+                        raw_type.clone()
+                    },
+                    column_type: Some(ct),
+                    nullable: conv::row_string(&r, 2).map(|v| v == "YES"),
+                    primary_key: conv::row_string(&r, 3).map(|v| v == "PRI"),
+                    default: conv::row_string(&r, 4),
+                    comment: conv::row_string(&r, 5),
+                }
             })
             .collect())
     }
@@ -179,7 +212,8 @@ impl Connection for MysqlConnection {
     }
 
     async fn foreign_keys(&mut self, schema: &str, table: &str) -> Result<Vec<ForeignKeyInfo>> {
-        let sql = "SELECT CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME \
+        let sql =
+            "SELECT CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME \
                    FROM information_schema.KEY_COLUMN_USAGE \
                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL \
                    ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION";
@@ -264,12 +298,15 @@ impl Connection for MysqlConnection {
 
         let mut qr = self.conn.query_iter(sql).await.map_err(db_err)?;
         if let Some(cols) = qr.columns() {
+            // 查询结果路径：#33 由列定义构造结构化 column_type，type_name 同源生成
+            let column_types: Vec<ColumnType> = cols.iter().map(conv::from_mysql_column).collect();
             let columns: Vec<ColumnInfo> = cols
                 .iter()
-                .map(|c| ColumnInfo {
+                .zip(&column_types)
+                .map(|(c, ct)| ColumnInfo {
                     name: c.name_str().to_string(),
-                    type_name: format!("{:?}", c.column_type()),
-                    column_type: None,
+                    type_name: MysqlDialect.display_type_name(ct),
+                    column_type: Some(ct.clone()),
                     nullable: None,
                     primary_key: None,
                     default: None,
@@ -280,7 +317,7 @@ impl Connection for MysqlConnection {
 
             let mut batch = Vec::with_capacity(BATCH_ROWS);
             while let Some(row) = qr.next().await.map_err(db_err)? {
-                batch.push(row_to_values(&row));
+                batch.push(row_to_values(&row, &column_types));
                 if batch.len() >= BATCH_ROWS {
                     sink.on_event(StreamEvent::Rows(std::mem::take(&mut batch)));
                 }
@@ -303,7 +340,10 @@ impl Connection for MysqlConnection {
     }
 
     async fn begin(&mut self) -> Result<()> {
-        self.conn.query_drop("START TRANSACTION").await.map_err(db_err)
+        self.conn
+            .query_drop("START TRANSACTION")
+            .await
+            .map_err(db_err)
     }
 
     async fn commit(&mut self) -> Result<()> {
@@ -324,11 +364,17 @@ impl Connection for MysqlConnection {
     }
 }
 
-fn row_to_values(row: &Row) -> Vec<Value> {
+fn row_to_values(row: &Row, column_types: &[ColumnType]) -> Vec<Value> {
     (0..row.len())
-        .map(|i| match row.get::<mysql_async::Value, usize>(i) {
-            Some(v) => conv::mysql_value_to_dby(&v, &ColumnType::unknown()),
-            None => Value::Null,
+        .map(|i| {
+            let ct = column_types
+                .get(i)
+                .cloned()
+                .unwrap_or_else(ColumnType::unknown);
+            match row.get::<mysql_async::Value, usize>(i) {
+                Some(v) => conv::mysql_value_to_dby(&v, &ct),
+                None => Value::Null,
+            }
         })
         .collect()
 }

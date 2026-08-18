@@ -79,8 +79,9 @@ impl Dialect for MysqlDialect {
             | "multipolygon" | "geometry" | "geometrycollection" => ColumnTypeBase::Bytes,
             _ => ColumnTypeBase::Unknown,
         };
-        if unsigned && base == ColumnTypeBase::I64 {
-            base = ColumnTypeBase::U64;
+        // R6（#33）：unsigned 整数列 base 取 U 族（与查询路径 from_mysql_column 一致）
+        if unsigned {
+            base = crate::conv::to_unsigned(base);
         }
 
         let (numeric_precision, numeric_scale) = if base == ColumnTypeBase::Decimal {
@@ -193,13 +194,18 @@ mod tests {
     #[test]
     fn parse_mysql_column_types() {
         let d = MysqlDialect;
+        // R6：#33 后 unsigned 整数列 base 取 U 族（与查询路径 from_mysql_column 一致）
         assert_eq!(
             d.parse_column_type("int(11) unsigned").map(|c| c.base),
-            Some(B::I32)
+            Some(B::U32)
         );
         assert_eq!(
             d.parse_column_type("int(11) unsigned").map(|c| c.unsigned),
             Some(true)
+        );
+        assert_eq!(
+            d.parse_column_type("smallint unsigned").map(|c| c.base),
+            Some(B::U16)
         );
         let dec = d.parse_column_type("decimal(10,2)").unwrap();
         assert_eq!(dec.base, B::Decimal);

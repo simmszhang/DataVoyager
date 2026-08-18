@@ -8,6 +8,8 @@ description = "MySQL driver for dby"
 
 [dependencies]
 dby-core = { path = "../dby-core" }
+# 转发错误 `log::warn!`（design §7：壳层/驱动尚未接线 logger，暂为 no-op，根因以 last_error 槽为主通道）
+log = "0.4"
 serde_json.workspace = true
 async-trait = "0.1"
 # 异步驱动：流式 + 取消；纯 Rust flate2（minimal-rust）；rustls + ring 提供 TLS

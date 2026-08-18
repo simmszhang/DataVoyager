@@ -1,9 +1,12 @@
 //! SSH 隧道：russh 本地端口转发（MySQL 驱动通过隧道连接远端数据库）。
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use dby_core::driver::SshOptions;
 use dby_core::error::{DbError, Result};
+use dby_core::query::CancellationToken;
 
 fn ssh_err(e: russh::Error) -> DbError {
     DbError::Other(e.to_string())
@@ -105,11 +108,72 @@ pub async fn probe_host_key(ssh: &SshOptions) -> Result<String> {
     Ok(fp)
 }
 
-/// 活跃的 SSH 隧道：持有 SSH 会话与转发任务，MySQL 连接存续期间保持存活。
+/// 活跃的 SSH 隧道：持有 SSH 会话、accept 循环与转发任务，MySQL 连接存续期间保持存活。
+///
+/// `Drop` 显式释放（design §4.1）：cancel 唤醒 accept 循环 + abort 循环任务（连同 listener）
+/// + abort 全部转发任务；会话 `Arc` 随结构 drop 释放 → 关闭 SSH 会话。
 pub struct SshTunnel {
     pub local_port: u16,
-    _handle: Arc<russh::client::Handle<ClientHandler>>,
-    _task: tokio::task::JoinHandle<()>,
+    /// 取消信号：`Drop` 时先 `cancel()`（watch 实现，无丢失唤醒）。
+    cancel: CancellationToken,
+    /// SSH 会话 handle（`None` 仅测试路径——`russh::client::Handle` 无公开构造器，
+    /// 单测按 design §6「无需 sshd/Handle」直接构造 `SshTunnel` 断言 Drop 语义）。
+    _handle: Option<Arc<russh::client::Handle<ClientHandler>>>,
+    /// accept 循环任务；`Drop` 时 abort（任务内 listener 随之 drop，端口释放）。
+    task: tokio::task::JoinHandle<()>,
+    /// 全部 per-forward 转发任务；`Drop` 时 `abort_all()` 终止（防任务继续持有会话 Arc）。
+    forwards: Arc<Mutex<tokio::task::JoinSet<()>>>,
+    /// direct-tcpip 首个失败根因（lib.rs 跨模块读取，须 `pub(crate)`，design §4.3）。
+    ///
+    /// `#[allow(dead_code)]`：本 crate 内只写不读——同批 Task 3（lib.rs
+    /// `MysqlDriver::connect` 失败路径）读取；跨模块交接前抑制告警。
+    #[allow(dead_code)]
+    pub(crate) last_error: Arc<Mutex<Option<String>>>,
+}
+
+/// 转发一个已接受连接的抽象：返回 boxed future（内部**不再** `tokio::spawn`），
+/// 由 `JoinSet::spawn` 恰好 spawn 一次——否则 `abort_all` 只命中包装任务、真转发任务
+/// 被 detach 继续持有会话 Arc（design §4.2 注）。
+type ForwardConn = dyn Fn(tokio::net::TcpStream) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+    + Send
+    + Sync;
+
+impl Drop for SshTunnel {
+    fn drop(&mut self) {
+        self.cancel.cancel(); // 唤醒 accept 循环（select! 竞速取消退出）
+        self.task.abort(); // 停止 accept 循环（连同 listener 一起 drop）
+        if let Ok(mut f) = self.forwards.lock() {
+            f.abort_all(); // 终止全部转发任务（释放其持有的会话 Arc）
+                           // tokio 语义：abort_all 只 abort、不移除任务（`len()` 不变）；
+                           // detach_all 清空 JoinSet，使 drop 后 `forwards` 为空（已 abort 的任务不会再运行）
+            f.detach_all();
+        }
+        // _handle 的 Arc 随结构 drop 释放 → 关闭 SSH 会话
+    }
+}
+
+/// 可取消的 accept 循环：`tokio::select!` 竞速 `cancel.cancelled()` 与 `listener.accept()`，
+/// 取消即退出（不依赖 `accept()` 返回 Err）；每个连接交给 `forward` 由 `forwards` JoinSet 托管。
+fn run_accept_loop(
+    listener: tokio::net::TcpListener,
+    cancel: CancellationToken,
+    forwards: Arc<Mutex<tokio::task::JoinSet<()>>>,
+    forward: Arc<ForwardConn>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => break,
+                accepted = listener.accept() => match accepted {
+                    Ok((socket, _)) => {
+                        forwards.lock().unwrap().spawn(forward(socket));
+                    }
+                    Err(_) => break,
+                },
+            }
+        }
+    })
 }
 
 /// 认证方式：`private_key` 存在时优先公钥认证，否则回退密码认证。
@@ -197,37 +261,53 @@ pub async fn start_tunnel(
         .port();
 
     let handle = Arc::new(handle);
-    let h = handle.clone();
+    let cancel = CancellationToken::new();
+    let forwards: Arc<Mutex<tokio::task::JoinSet<()>>> =
+        Arc::new(Mutex::new(tokio::task::JoinSet::new()));
+    let last_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+    // 真实 forward：direct-tcpip 失败写 `last_error` 槽（根因回传，design §4.3）+ `log::warn!`；
+    // `copy_bidirectional` 中断仅 `log::warn!`（正常断开，不附带，design §5）。
+    // 返回 boxed future，由 `JoinSet::spawn` 恰好 spawn 一次（design §4.2 注）。
     let target_host = target_host.to_string();
-    let task = tokio::spawn(async move {
-        loop {
-            let (mut socket, _) = match listener.accept().await {
-                Ok(x) => x,
-                Err(_) => break,
-            };
-            let h2 = h.clone();
-            let th = target_host.clone();
-            tokio::spawn(async move {
-                let channel = h2
-                    .channel_open_direct_tcpip(
-                        th,
-                        target_port as u32,
-                        "127.0.0.1".to_string(),
-                        0,
-                    )
+    let forward: Arc<ForwardConn> = {
+        let h2 = handle.clone();
+        let th = target_host.clone();
+        let last_error = last_error.clone();
+        Arc::new(move |mut socket| {
+            let h2 = h2.clone();
+            let th = th.clone();
+            let last_error = last_error.clone();
+            Box::pin(async move {
+                match h2
+                    .channel_open_direct_tcpip(th, target_port as u32, "127.0.0.1".to_string(), 0)
                     .await
-                    .map_err(ssh_err)?;
-                let mut stream = channel.into_stream();
-                let _ = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
-                Ok::<(), DbError>(())
-            });
-        }
-    });
+                {
+                    Ok(channel) => {
+                        let mut stream = channel.into_stream();
+                        if let Err(e) =
+                            tokio::io::copy_bidirectional(&mut socket, &mut stream).await
+                        {
+                            log::warn!("SSH 转发中断: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("SSH direct-tcpip failed: {e}");
+                        *last_error.lock().unwrap() = Some(e.to_string());
+                    }
+                }
+            })
+        })
+    };
+    let task = run_accept_loop(listener, cancel.clone(), forwards.clone(), forward);
 
     Ok(SshTunnel {
         local_port,
-        _handle: handle,
-        _task: task,
+        cancel,
+        _handle: Some(handle),
+        task,
+        forwards,
+        last_error,
     })
 }
 
@@ -375,5 +455,108 @@ mod tests {
             }
             other => panic!("expected DbError::Config, got {other:?}"),
         }
+    }
+
+    /// `run_accept_loop` 取消语义：`cancel()` 后循环退出（不依赖 `accept()` 返回 Err），
+    /// listener 释放（同端口可重新绑定）。注入 fake forward（无 sshd/真实 Handle，design §6）。
+    #[tokio::test]
+    async fn accept_loop_exits_on_cancel() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let local_port = listener.local_addr().unwrap().port();
+        let cancel = CancellationToken::new();
+        let forwards: Arc<Mutex<tokio::task::JoinSet<()>>> =
+            Arc::new(Mutex::new(tokio::task::JoinSet::new()));
+        let forward: Arc<ForwardConn> = Arc::new(|_socket| Box::pin(async {})); // fake
+        let h = run_accept_loop(listener, cancel.clone(), forwards, forward);
+        cancel.cancel();
+        // 循环应退出且任务正常结束
+        tokio::time::timeout(std::time::Duration::from_secs(1), h)
+            .await
+            .expect("accept 循环应在取消后退出")
+            .expect("accept 循环任务应正常结束");
+        // listener 已释放：同端口可重新绑定
+        let rebind = tokio::net::TcpListener::bind(("127.0.0.1", local_port)).await;
+        assert!(rebind.is_ok(), "取消后 listener 应已释放（端口可重新绑定）");
+    }
+
+    /// `SshTunnel` drop 语义：cancel + abort accept 循环（listener 释放、端口立即可重新绑定）
+    /// + `forwards.abort_all()`（无残留转发任务）。
+    /// 本地 TcpListener + fake forward（记录调用），无 sshd/真实 Handle（design §6）。
+    #[tokio::test]
+    async fn drop_aborts_accept_loop_and_forwards() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let local_port = listener.local_addr().unwrap().port();
+        let cancel = CancellationToken::new();
+        let forwards: Arc<Mutex<tokio::task::JoinSet<()>>> =
+            Arc::new(Mutex::new(tokio::task::JoinSet::new()));
+
+        // fake forward：记录调用并把任务挂起（永不自行结束，只能由 abort_all 终止）
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let calls2 = calls.clone();
+        let forward: Arc<ForwardConn> = Arc::new(move |_socket| {
+            let c = calls2.clone();
+            Box::pin(async move {
+                c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                std::future::pending::<()>().await;
+            })
+        });
+
+        let task = run_accept_loop(listener, cancel.clone(), forwards.clone(), forward);
+        let tunnel = SshTunnel {
+            local_port,
+            cancel,
+            _handle: None, // 测试路径：无真实会话（design §6 无需 sshd/Handle）
+            task,
+            forwards: forwards.clone(),
+            last_error: Arc::new(Mutex::new(None)),
+        };
+
+        // 触发一次 accept → 一个 forward 任务进入 JoinSet
+        let _client = tokio::net::TcpStream::connect(("127.0.0.1", local_port))
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while calls.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("accept 循环应处理连接并调用 forward");
+        assert_eq!(
+            forwards.lock().unwrap().len(),
+            1,
+            "forward 任务应已进入 JoinSet"
+        );
+
+        drop(tunnel);
+
+        // abort_all 生效：JoinSet 内无残留任务
+        assert_eq!(
+            forwards.lock().unwrap().len(),
+            0,
+            "drop 后 forwards 应为空（abort_all 生效）"
+        );
+        // accept 任务结束 + listener 释放：同端口立即可重新绑定
+        // （abort 是异步取消，轮询等待 listener 实际关闭，避免竞态）
+        let rebind = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if tokio::net::TcpListener::bind(("127.0.0.1", local_port))
+                    .await
+                    .is_ok()
+                {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        assert!(
+            rebind.is_ok(),
+            "drop 后 listener 应已释放（端口可重新绑定）"
+        );
     }
 }

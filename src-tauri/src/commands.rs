@@ -407,7 +407,7 @@ pub async fn delete_saved_connection(
         cfg.connections.retain(|c| c.id != config_id);
         cfg.save(&state.config_path)?;
     }
-    let _ = delete_secret(&config_id);
+    delete_secrets(&config_id);
     Ok(())
 }
 
@@ -500,12 +500,16 @@ pub async fn execute_query(
             rec.status = "ok".to_string();
             rec.rows_affected = output.affected_rows;
             rec.row_count = output.first_result_set().map(|rs| rs.rows.len() as u64);
-            let _ = state.history.record(&rec);
+            if let Err(e) = state.history.record(&rec) {
+                log::warn!("写入历史记录失败: {e}");
+            }
             Ok(output)
         }
         Err(e) => {
             rec.status = e.to_string();
-            let _ = state.history.record(&rec);
+            if let Err(e) = state.history.record(&rec) {
+                log::warn!("写入历史记录失败: {e}");
+            }
             Err(e)
         }
     }
@@ -555,16 +559,30 @@ pub async fn delete_project(
     if !confirmed {
         return Err(DbError::Config("危险操作需二次确认".to_string()));
     }
+    delete_project_impl(state.inner(), &id).await
+}
+
+/// 删除项目（R1，design §4.6）：活跃连接或「已保存连接」（config.connections，非仅活跃）任一存在即
+/// 返回 `DbError::Config` 拒绝（不级联删除，避免误删其它项目在用凭据，#41）。
+async fn delete_project_impl(state: &Arc<AppState>, id: &str) -> Result<()> {
     {
         let guard = state.connections.lock().await;
         if guard.values().any(|c| c.project_id == id) {
             return Err(DbError::Config("项目下仍有连接，请先删除连接".to_string()));
         }
     }
+    {
+        let cfg = state.config.lock().await;
+        if cfg.connections.iter().any(|c| c.project_id == id) {
+            return Err(DbError::Config(
+                "项目下仍有已保存连接，请先删除连接".to_string(),
+            ));
+        }
+    }
     let mut cfg = state.config.lock().await;
     cfg.projects.retain(|p| p.id != id);
     cfg.save(&state.config_path)?;
-    state.history.clear(Some(&id))?;
+    state.history.clear(Some(id))?;
     Ok(())
 }
 
@@ -628,7 +646,9 @@ impl ResultSink for ChannelSink {
         if let StreamEvent::Rows(ref rows) = ev {
             self.rows += rows.len();
         }
-        let _ = self.channel.send(ev);
+        if let Err(e) = self.channel.send(ev) {
+            log::warn!("转发流式事件到前端失败: {e}");
+        }
     }
 }
 
@@ -677,12 +697,16 @@ pub async fn execute_query_stream(
     match result {
         Ok(()) => {
             rec.status = "ok".to_string();
-            let _ = state.history.record(&rec);
+            if let Err(e) = state.history.record(&rec) {
+                log::warn!("写入历史记录失败: {e}");
+            }
             Ok(())
         }
         Err(e) => {
             rec.status = e.to_string();
-            let _ = state.history.record(&rec);
+            if let Err(e) = state.history.record(&rec) {
+                log::warn!("写入历史记录失败: {e}");
+            }
             Err(e)
         }
     }
@@ -822,12 +846,16 @@ pub async fn execute_edit(
             rec.status = "ok".to_string();
             rec.rows_affected = output.affected_rows;
             rec.row_count = output.first_result_set().map(|rs| rs.rows.len() as u64);
-            let _ = state.history.record(&rec);
+            if let Err(e) = state.history.record(&rec) {
+                log::warn!("写入历史记录失败: {e}");
+            }
             Ok(output)
         }
         Err(e) => {
             rec.status = e.to_string();
-            let _ = state.history.record(&rec);
+            if let Err(e) = state.history.record(&rec) {
+                log::warn!("写入历史记录失败: {e}");
+            }
             Err(e)
         }
     }
@@ -881,12 +909,16 @@ async fn run_ddl(
         Ok(o) => {
             rec.status = "ok".to_string();
             rec.rows_affected = o.affected_rows;
-            let _ = state.history.record(&rec);
+            if let Err(e) = state.history.record(&rec) {
+                log::warn!("写入历史记录失败: {e}");
+            }
             Ok(o)
         }
         Err(e) => {
             rec.status = e.to_string();
-            let _ = state.history.record(&rec);
+            if let Err(e) = state.history.record(&rec) {
+                log::warn!("写入历史记录失败: {e}");
+            }
             Err(e)
         }
     }
@@ -1002,12 +1034,16 @@ pub async fn export_result(
             rec.status = "ok".to_string();
             rec.rows_affected = o.affected_rows;
             rec.row_count = o.first_result_set().map(|rs| rs.rows.len() as u64);
-            let _ = state.history.record(&rec);
+            if let Err(e) = state.history.record(&rec) {
+                log::warn!("写入历史记录失败: {e}");
+            }
             o
         }
         Err(e) => {
             rec.status = e.to_string();
-            let _ = state.history.record(&rec);
+            if let Err(e) = state.history.record(&rec) {
+                log::warn!("写入历史记录失败: {e}");
+            }
             return Err(e);
         }
     };
@@ -1193,6 +1229,54 @@ mod tests {
             params.params.get("charset").map(String::as_str),
             Some("utf8mb4"),
             "params 必须回填"
+        );
+    }
+
+    /// R1（design §4.6，覆盖 brief「删除后级联清理」措辞）：`delete_project` 必须 REJECT（不级联）——
+    /// 项目下存在「已保存连接」（config.connections，非仅活跃连接）时返回 `DbError::Config`，
+    /// 且项目与已保存连接均须保留（#41）。
+    #[tokio::test]
+    async fn delete_project_rejects_or_cascades_saved_connections() {
+        let mut config = dby_core::config::AppConfig::with_default_project();
+        let project_id = config.projects[0].id.clone();
+        config.connections.push(ConnectionConfig {
+            id: "cfg-saved-1".to_string(),
+            project_id: project_id.clone(),
+            name: "saved".to_string(),
+            driver: "mysql".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 3306,
+            user: "root".to_string(),
+            database: None,
+            ssl: None,
+            ssh: None,
+            color: None,
+            params: std::collections::HashMap::new(),
+        });
+        let state = Arc::new(AppState::new(
+            config,
+            dby_core::history::HistoryStore::open_in_memory().unwrap(),
+            std::path::PathBuf::from("unused-config.json"),
+        ));
+
+        let result = delete_project_impl(&state, &project_id).await;
+
+        assert!(
+            result.is_err(),
+            "项目下存在已保存连接时必须拒绝删除（不级联）"
+        );
+        assert!(
+            matches!(result, Err(DbError::Config(_))),
+            "必须返回 DbError::Config"
+        );
+        let cfg = state.config.lock().await;
+        assert!(
+            cfg.projects.iter().any(|p| p.id == project_id),
+            "拒绝后项目必须保留（REJECT 而非级联删除）"
+        );
+        assert!(
+            cfg.connections.iter().any(|c| c.id == "cfg-saved-1"),
+            "拒绝后已保存连接必须保留"
         );
     }
 

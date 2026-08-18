@@ -252,8 +252,8 @@ impl Value {
         match self {
             Value::Null => serde_json::Value::Null,
             Value::Bool(b) => serde_json::Value::Bool(*b),
-            Value::I64(i) => serde_json::Value::from(*i),
-            Value::U64(u) => serde_json::Value::from(*u),
+            Value::I64(i) => serde_json::Value::String(i.to_string()),
+            Value::U64(u) => serde_json::Value::String(u.to_string()),
             Value::F64(f) => serde_json::Number::from_f64(*f)
                 .map(serde_json::Value::Number)
                 .unwrap_or(serde_json::Value::Null),
@@ -357,6 +357,18 @@ mod tests {
             let back: Value = serde_json::from_str(&json).unwrap();
             assert_eq!(v, back, "roundtrip failed for {json}");
         }
+    }
+
+    #[test]
+    fn to_json_value_keeps_bigint_as_string() {
+        assert_eq!(
+            Value::I64(9223372036854775807).to_json_value(),
+            serde_json::json!("9223372036854775807")
+        );
+        assert_eq!(
+            Value::U64(18446744073709551615).to_json_value(),
+            serde_json::json!("18446744073709551615")
+        );
     }
 
     #[test]

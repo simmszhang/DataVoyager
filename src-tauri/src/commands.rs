@@ -329,6 +329,36 @@ pub async fn list_saved_connections(
         .collect())
 }
 
+/// 从钥匙串读出的凭据集合（MySQL 密码 + SSH 密码 + SSH 私钥）。
+/// 与 keyring 解耦：`build_params_from_config` 只消费它，便于无钥匙串单测（#22）。
+#[derive(Debug, Clone, Default)]
+struct SshSecrets {
+    password: Option<String>,
+    ssh_password: Option<String>,
+    ssh_private_key: Option<String>,
+}
+
+/// 纯映射：把已存连接配置 + 钥匙串凭据拼成 `ConnectParams`（#22/#63）。
+/// - `password` 来自 secrets；ssh.password/private_key 覆盖 config 中残留值；
+/// - `params` 从 config 回填（驱动特定参数）。
+fn build_params_from_config(config: &ConnectionConfig, secrets: &SshSecrets) -> ConnectParams {
+    ConnectParams {
+        driver: config.driver.clone(),
+        host: config.host.clone(),
+        port: config.port,
+        user: config.user.clone(),
+        password: secrets.password.clone(),
+        database: config.database.clone(),
+        ssl: config.ssl.clone(),
+        ssh: config.ssh.clone().map(|mut s| {
+            s.password = secrets.ssh_password.clone();
+            s.private_key = secrets.ssh_private_key.clone();
+            s
+        }),
+        params: config.params.clone(),
+    }
+}
+
 #[tauri::command]
 pub async fn reconnect(
     state: State<'_, Arc<AppState>>,
@@ -336,25 +366,28 @@ pub async fn reconnect(
 ) -> Result<ConnectResponse> {
     let config = {
         let cfg = state.config.lock().await;
-        cfg.connections
-            .iter()
-            .find(|c| c.id == config_id)
-            .cloned()
+        cfg.connections.iter().find(|c| c.id == config_id).cloned()
     }
     .ok_or_else(|| DbError::Config("连接配置不存在".to_string()))?;
 
-    let password = get_secret(&config_id).ok();
-    let params = ConnectParams {
-        driver: config.driver.clone(),
-        host: config.host.clone(),
-        port: config.port,
-        user: config.user.clone(),
-        password,
-        database: config.database.clone(),
-        ssl: config.ssl.clone(),
-        ssh: config.ssh.clone(),
-        params: std::collections::HashMap::new(),
+    let secrets = SshSecrets {
+        password: get_secret(&secret_key(&config_id, SecretKind::MysqlPassword)).ok(),
+        ssh_password: get_secret(&secret_key(&config_id, SecretKind::SshPassword)).ok(),
+        ssh_private_key: get_secret(&secret_key(&config_id, SecretKind::SshPrivateKey)).ok(),
     };
+
+    // 缺 secret 判定：SSH 启用但 keyring 无任何 SSH 凭据 → 报错，引导前端走 connect 补录。
+    // MySQL 密码缺失不强制（可能无密码库），由驱动认证失败自然报错（§4.5/§7）。
+    if config.ssh.as_ref().map(|s| s.enabled).unwrap_or(false)
+        && secrets.ssh_password.is_none()
+        && secrets.ssh_private_key.is_none()
+    {
+        return Err(DbError::Config(
+            "该连接未保存 SSH 凭据，请重新连接并输入".to_string(),
+        ));
+    }
+
+    let params = build_params_from_config(&config, &secrets);
     open_session(
         state.inner(),
         &params,
@@ -1099,5 +1132,93 @@ mod tests {
             state.connections.lock().await.is_empty(),
             "save=false 不得产生活跃连接残留"
         );
+    }
+
+    /// `build_params_from_config`：ssh.password/private_key 必须来自 secrets（而非 config 中残留明文），
+    /// params 必须回填，MySQL 密码来自 secrets（#22/#63）。
+    #[test]
+    fn build_params_from_config_ssh_secrets_override_config() {
+        let config = ConnectionConfig {
+            id: "c1".to_string(),
+            project_id: "p1".to_string(),
+            name: "demo".to_string(),
+            driver: "mysql".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 3306,
+            user: "root".to_string(),
+            database: Some("app".to_string()),
+            ssl: None,
+            ssh: Some(dby_core::driver::SshOptions {
+                enabled: true,
+                host: "10.0.0.1".to_string(),
+                user: "ubuntu".to_string(),
+                password: Some("config-明文".to_string()), // 不得被使用
+                private_key: Some("config-明文".to_string()), // 不得被使用
+                ..Default::default()
+            }),
+            color: None,
+            params: std::collections::HashMap::from([(
+                "charset".to_string(),
+                "utf8mb4".to_string(),
+            )]),
+        };
+        let secrets = SshSecrets {
+            password: Some("mysql-pw".to_string()),
+            ssh_password: Some("ssh-pw".to_string()),
+            ssh_private_key: Some("ssh-key".to_string()),
+        };
+
+        let params = build_params_from_config(&config, &secrets);
+
+        assert_eq!(params.driver, "mysql");
+        assert_eq!(params.host, "127.0.0.1");
+        assert_eq!(params.port, 3306);
+        assert_eq!(params.user, "root");
+        assert_eq!(params.password.as_deref(), Some("mysql-pw"));
+        assert_eq!(params.database.as_deref(), Some("app"));
+        let ssh = params.ssh.expect("ssh 应保留");
+        assert_eq!(
+            ssh.password.as_deref(),
+            Some("ssh-pw"),
+            "ssh.password 必须来自 secrets"
+        );
+        assert_eq!(
+            ssh.private_key.as_deref(),
+            Some("ssh-key"),
+            "ssh.private_key 必须来自 secrets"
+        );
+        assert_eq!(ssh.host, "10.0.0.1");
+        assert_eq!(ssh.user, "ubuntu");
+        assert_eq!(
+            params.params.get("charset").map(String::as_str),
+            Some("utf8mb4"),
+            "params 必须回填"
+        );
+    }
+
+    /// 无 SSH 配置时，即使 secrets 为空也不得凭空产生 ssh/密码。
+    #[test]
+    fn build_params_from_config_no_ssh_keeps_none() {
+        let config = ConnectionConfig {
+            id: "c2".to_string(),
+            project_id: "p1".to_string(),
+            name: "plain".to_string(),
+            driver: "mysql".to_string(),
+            host: "db.internal".to_string(),
+            port: 3306,
+            user: "app".to_string(),
+            database: None,
+            ssl: None,
+            ssh: None,
+            color: None,
+            params: std::collections::HashMap::new(),
+        };
+
+        let params = build_params_from_config(&config, &SshSecrets::default());
+
+        assert!(params.ssh.is_none(), "无 SSH 配置时不得产生 ssh");
+        assert!(params.password.is_none(), "无 secrets 时密码应为 None");
+        assert_eq!(params.host, "db.internal");
+        assert!(params.params.is_empty());
     }
 }

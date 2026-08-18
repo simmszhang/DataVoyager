@@ -127,12 +127,19 @@ export default function App() {
   }
 
   /// 树节点点击表：设置该连接的默认库 + 编辑区查询。
-  function handleOpenTable(connId: number, database: string, table: string) {
+  /// SQL 由后端按连接方言生成（#4），前端不再硬编码反引号/LIMIT。
+  async function handleOpenTable(connId: number, database: string, table: string) {
     updateWorkspace(connId, {
       selectedDb: database,
       selectedTable: table,
-      query: `SELECT * FROM \`${table}\` LIMIT 100;`,
     });
+    try {
+      const sql = await api.buildTableSelect(connId, table);
+      updateWorkspace(connId, { query: sql });
+    } catch (e) {
+      updateWorkspace(connId, { error: String(e) });
+      setStatus("生成表浏览 SQL 失败");
+    }
   }
 
   async function runQuery(id: number, sql: string, confirmed: boolean = false) {

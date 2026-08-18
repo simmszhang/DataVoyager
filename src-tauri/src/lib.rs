@@ -50,6 +50,7 @@ pub fn run() {
             commands::list_databases,
             commands::list_tables,
             commands::list_columns,
+            commands::build_table_select,
             commands::execute_query,
             commands::execute_query_stream,
             commands::cancel_query,

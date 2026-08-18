@@ -546,6 +546,30 @@ pub async fn list_columns(
     active.conn.columns(&database, &table).await
 }
 
+/// 表浏览 SQL 生成（#4）：SQL 由 dby-core 的 `Dialect` 生成，前端只传结构化参数。
+/// 遵循 S1 持锁范式：外层同步锁只快照 Arc，per-connection 锁只读 `driver_id`，不跨其它 await。
+#[tauri::command]
+pub async fn build_table_select(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    table: String,
+) -> Result<String> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let active = entry.lock().await; // 只读 driver_id
+    let driver = state.registry.resolve(&active.driver_id)?;
+    Ok(dby_core::query::build_table_select(
+        driver.dialect(),
+        &table,
+        Some(100),
+    ))
+}
+
 #[tauri::command]
 pub async fn execute_query(
     state: State<'_, Arc<AppState>>,

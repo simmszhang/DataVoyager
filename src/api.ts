@@ -302,6 +302,8 @@ export const api = {
     invoke<TableInfo[]>("list_tables", { id, database }),
   listColumns: (id: number, database: string, table: string) =>
     invoke<ColumnInfo[]>("list_columns", { id, database, table }),
+  buildTableSelect: (connId: number, table: string) =>
+    invoke<string>("build_table_select", { id: connId, table }),
   executeQuery: (id: number, database: string | null, sql: string, confirmed: boolean) =>
     invoke<QueryOutput>("execute_query", { id, database, sql, confirmed }),
   executeQueryStream: (

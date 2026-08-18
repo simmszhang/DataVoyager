@@ -127,7 +127,6 @@ pub struct SshTunnel {
     ///
     /// `#[allow(dead_code)]`：本 crate 内只写不读——同批 Task 3（lib.rs
     /// `MysqlDriver::connect` 失败路径）读取；跨模块交接前抑制告警。
-    #[allow(dead_code)]
     pub(crate) last_error: Arc<Mutex<Option<String>>>,
 }
 

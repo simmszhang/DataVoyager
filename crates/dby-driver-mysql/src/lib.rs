@@ -82,7 +82,17 @@ impl Driver for MysqlDriver {
                 opts = opts.ssl_opts(Some(ssl_opts));
             }
         }
-        let conn = Conn::new(opts).await.map_err(db_err)?;
+        let conn = Conn::new(opts).await.map_err(|e| {
+            let mut msg = e.to_string();
+            // direct-tcpip 失败根因回传（design §4.3）：SSH 转发任务失败时已把根因写入
+            // `last_error` 槽，此处附带，避免连接本地端口失败只见通用错误。
+            if let Some(t) = &ssh {
+                if let Some(root) = t.last_error.lock().unwrap().as_deref() {
+                    msg = format!("{msg}（SSH 转发失败：{root}）");
+                }
+            }
+            DbError::Database(msg)
+        })?;
         let (major, minor, patch) = conn.server_version();
         Ok(Box::new(MysqlConnection {
             conn: Some(conn),

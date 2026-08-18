@@ -268,7 +268,7 @@ impl Connection for MysqlConnection {
                 .iter()
                 .map(|c| ColumnInfo {
                     name: c.name_str().to_string(),
-                    type_name: MysqlDialect.display_type_name(&format!("{:?}", c.column_type())),
+                    type_name: format!("{:?}", c.column_type()),
                     column_type: None,
                     nullable: None,
                     primary_key: None,

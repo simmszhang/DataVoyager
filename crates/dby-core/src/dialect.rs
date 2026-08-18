@@ -1,5 +1,7 @@
 //! SQL 方言抽象 + 通用语句切分。
 
+use crate::metadata::ColumnType;
+
 /// 每驱动声明自己的 SQL 语法规则，供编辑器、SQL 生成（编辑/导出/过滤）使用。
 pub trait Dialect: Send + Sync {
     /// 标识符引用（MySQL: `` ` ``，Postgres: `"`）。
@@ -8,10 +10,10 @@ pub trait Dialect: Send + Sync {
     fn quote_string(&self, s: &str) -> String;
     /// 分页子句，例如 `LIMIT n OFFSET m`。
     fn limit_clause(&self, limit: Option<u64>, offset: Option<u64>) -> String;
-    /// 原生类型名 → 展示名（默认透传）。
-    fn display_type_name(&self, raw: &str) -> String {
-        raw.to_string()
-    }
+    /// 原生类型字符串 → 结构化列类型（元数据路径；无法解析时返回 `None`）。
+    fn parse_column_type(&self, raw: &str) -> Option<ColumnType>;
+    /// 结构化列类型 → 展示名（由 `ColumnInfo.type_name` 消费，不再依赖 Debug 字符串）。
+    fn display_type_name(&self, ct: &ColumnType) -> String;
 }
 
 /// 朴素但正确的语句切分：在单/双引号、反引号、行注释、块注释之外按 `;` 切分。
@@ -133,6 +135,12 @@ mod tests {
                 (None, Some(o)) => format!("LIMIT {o}, 18446744073709551615"),
                 (None, None) => String::new(),
             }
+        }
+        fn parse_column_type(&self, _raw: &str) -> Option<ColumnType> {
+            None
+        }
+        fn display_type_name(&self, ct: &ColumnType) -> String {
+            format!("{:?}", ct.base)
         }
     }
 

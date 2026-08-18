@@ -103,7 +103,7 @@ pub fn to_insert_sql(dialect: &dyn Dialect, table: &str, rs: &ResultSet) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metadata::ColumnInfo;
+    use crate::metadata::{ColumnInfo, ColumnType};
     use crate::value::Value;
 
     struct TestDialect;
@@ -116,6 +116,12 @@ mod tests {
         }
         fn limit_clause(&self, _limit: Option<u64>, _offset: Option<u64>) -> String {
             String::new()
+        }
+        fn parse_column_type(&self, _raw: &str) -> Option<ColumnType> {
+            None
+        }
+        fn display_type_name(&self, ct: &ColumnType) -> String {
+            format!("{:?}", ct.base)
         }
     }
 

@@ -97,6 +97,7 @@ fn build_where(dialect: &dyn Dialect, pk: &[(String, Value)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metadata::ColumnType;
 
     struct TestDialect;
     impl Dialect for TestDialect {
@@ -112,6 +113,12 @@ mod tests {
                 (Some(l), None) => format!("LIMIT {l}"),
                 _ => String::new(),
             }
+        }
+        fn parse_column_type(&self, _raw: &str) -> Option<ColumnType> {
+            None
+        }
+        fn display_type_name(&self, ct: &ColumnType) -> String {
+            format!("{:?}", ct.base)
         }
     }
 

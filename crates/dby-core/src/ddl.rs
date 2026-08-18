@@ -60,6 +60,7 @@ pub fn build_drop_table(dialect: &dyn Dialect, table: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metadata::ColumnType;
 
     struct TestDialect;
     impl Dialect for TestDialect {
@@ -71,6 +72,12 @@ mod tests {
         }
         fn limit_clause(&self, _l: Option<u64>, _o: Option<u64>) -> String {
             String::new()
+        }
+        fn parse_column_type(&self, _raw: &str) -> Option<ColumnType> {
+            None
+        }
+        fn display_type_name(&self, ct: &ColumnType) -> String {
+            format!("{:?}", ct.base)
         }
     }
 

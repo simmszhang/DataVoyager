@@ -79,6 +79,8 @@ export interface ConnectParams {
     port: number;
     user: string;
     password?: string | null;
+    /** TOFU 已信任主机指纹（OpenSSH 风格 "SHA256:…"），由探针确认后回填 */
+    host_key_fingerprint?: string;
   } | null;
 }
 
@@ -211,6 +213,8 @@ export const api = {
   listDrivers: () => invoke<DriverInfo[]>("list_drivers"),
   testConnection: (params: ConnectParams) =>
     invoke<string>("test_connection", { params }),
+  probeHostKey: (params: ConnectParams) =>
+    invoke<string>("probe_host_key", { params }),
 
   connect: (params: ConnectParams, projectId?: string | null) =>
     invoke<ConnectResponse>("connect", { params, projectId }),

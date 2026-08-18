@@ -23,9 +23,15 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
     sshPort: "22",
     sshUser: "",
     sshPassword: "",
+    sshFingerprint: "",
   });
   const [busy, setBusy] = useState<null | "test" | "connect">(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pendingFingerprint, setPendingFingerprint] = useState<{
+    fp: string;
+    params: ConnectParams;
+    mode: "test" | "connect";
+  } | null>(null);
 
   const params = (): ConnectParams => ({
     driver: form.driver,
@@ -42,22 +48,45 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
           port: Number(form.sshPort) || 22,
           user: form.sshUser.trim(),
           password: form.sshPassword || null,
+          host_key_fingerprint: form.sshFingerprint || undefined,
         }
       : null,
   });
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm((f) => ({ ...f, [key]: e.target.value }));
+    setForm((f) => {
+      const next = { ...f, [key]: e.target.value };
+      // SSH 参数变更后，已确认的指纹不再适用（TOFU 以 host:port 为锚）
+      if (key.startsWith("ssh") && key !== "sshFingerprint") next.sshFingerprint = "";
+      return next;
+    });
 
   const setBool =
     (key: "ssl" | "verifyCert" | "ssh") => (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((f) => ({ ...f, [key]: e.target.checked }));
 
+  /// 前置 TOFU：SSH 开启且尚无已信任指纹时，先探针取指纹，弹窗确认后由
+  /// `confirmFingerprint` 携带指纹重试；返回 null 表示等待用户确认。
+  async function ensureFingerprint(
+    p: ConnectParams,
+    mode: "test" | "connect",
+  ): Promise<ConnectParams | null> {
+    if (p.ssh?.enabled && !p.ssh.host_key_fingerprint) {
+      const fp = await api.probeHostKey(p);
+      setPendingFingerprint({ fp, params: p, mode });
+      return null;
+    }
+    return p;
+  }
+
   async function handleTest() {
     setBusy("test");
     setMessage(null);
     try {
-      const version = await api.testConnection(params());
+      const p = params();
+      const ready = await ensureFingerprint(p, "test");
+      if (!ready) return; // 等待指纹确认
+      const version = await api.testConnection(ready);
       setMessage({ ok: true, text: `连接成功，服务器版本 ${version}` });
     } catch (e) {
       setMessage({ ok: false, text: String(e) });
@@ -70,10 +99,41 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
     setBusy("connect");
     setMessage(null);
     try {
-      await api.connect(params(), projectId);
+      const p = params();
+      const ready = await ensureFingerprint(p, "connect");
+      if (!ready) return; // 等待指纹确认
+      await api.connect(ready, projectId);
       onConnected();
     } catch (e) {
       setMessage({ ok: false, text: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /// 用户确认指纹：同一会话内回填表单避免重复确认，并按原意图（测试/连接）重试。
+  async function confirmFingerprint() {
+    if (!pendingFingerprint) return;
+    const { fp, params: p, mode } = pendingFingerprint;
+    setPendingFingerprint(null);
+    setForm((f) => ({ ...f, sshFingerprint: fp }));
+    const ready: ConnectParams = {
+      ...p,
+      ssh: p.ssh ? { ...p.ssh, host_key_fingerprint: fp } : p.ssh,
+    };
+    setBusy(mode);
+    setMessage(null);
+    try {
+      if (mode === "test") {
+        const version = await api.testConnection(ready);
+        setMessage({ ok: true, text: `连接成功，服务器版本 ${version}` });
+      } else {
+        await api.connect(ready, projectId);
+        onConnected();
+      }
+    } catch (e) {
+      setMessage({ ok: false, text: String(e) });
+    } finally {
       setBusy(null);
     }
   }
@@ -172,6 +232,38 @@ export default function ConnectionDialog({ drivers, projectId, onConnected, onCl
           </button>
         </div>
       </div>
+
+      {pendingFingerprint && (
+        <div className="modal-backdrop" onClick={(e) => e.stopPropagation()}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>确认 SSH 主机指纹</h2>
+              <button
+                className="icon-btn"
+                onClick={() => setPendingFingerprint(null)}
+                aria-label="关闭"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="danger-hint">
+                首次连接该 SSH 主机，请核对以下 SHA-256 主机指纹（TOFU）：
+              </p>
+              <pre className="danger-sql">{pendingFingerprint.fp}</pre>
+              <p className="muted">确认后将记住该指纹，后续连接自动校验。</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setPendingFingerprint(null)}>
+                取消
+              </button>
+              <button className="btn primary" onClick={confirmFingerprint}>
+                信任并{pendingFingerprint.mode === "test" ? "测试" : "连接"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

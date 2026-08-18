@@ -18,6 +18,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, OptsBuilder, Row, SslOpts};
 
 pub use dialect::MysqlDialect;
+pub use tunnel::probe_host_key;
 
 /// 每批推送的行数（降低 IPC 频率）。
 const BATCH_ROWS: usize = 100;

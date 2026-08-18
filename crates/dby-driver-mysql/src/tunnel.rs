@@ -45,8 +45,7 @@ impl russh::client::Handler for ClientHandler {
 }
 
 /// 探针 handler：`check_server_key` 恒放行（`Ok(true)`）并把指纹写入 `slot`，
-/// 由探针任务随后读取并断开（不认证）。Task 4 之前无生产调用点，故允许 dead_code。
-#[allow(dead_code)]
+/// 由探针任务随后读取并断开（不认证）。
 struct ProbeHandler {
     slot: Arc<Mutex<Option<String>>>,
 }
@@ -61,6 +60,28 @@ impl russh::client::Handler for ProbeHandler {
         *self.slot.lock().unwrap() = Some(fingerprint(server_public_key));
         Ok(true) // 放行完成 kex；探针随后读槽并断开（不认证）
     }
+}
+
+/// 探针：仅完成 SSH kex（不认证、不转发），返回主机公钥指纹后立即断开。
+///
+/// `russh::client::connect` 在 kex 完成（`check_server_key` 已把指纹写入槽）后才返回；
+/// 返回的 handle 直接 drop 即断开连接。
+pub async fn probe_host_key(ssh: &SshOptions) -> Result<String> {
+    let slot = Arc::new(Mutex::new(None));
+    let config = Arc::new(russh::client::Config::default());
+    let _handle = russh::client::connect(
+        config,
+        (ssh.host.clone(), ssh.port),
+        ProbeHandler { slot: slot.clone() },
+    )
+    .await
+    .map_err(ssh_err)?;
+    let fp = slot
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| DbError::Other("未能取得主机指纹".to_string()))?;
+    Ok(fp)
 }
 
 /// 活跃的 SSH 隧道：持有 SSH 会话与转发任务，MySQL 连接存续期间保持存活。
@@ -209,5 +230,21 @@ mod tests {
             .await
             .expect("no handler error"));
         assert_eq!(observed.lock().unwrap().as_deref(), Some(fp_a.as_str()));
+    }
+
+    /// `ProbeHandler`：`check_server_key` 恒 `Ok(true)` 且把实际指纹写入槽
+    /// （`probe_host_key` 依赖的路径：放行完成 kex，探针随后读槽）。
+    #[tokio::test]
+    async fn probe_handler_writes_slot_and_accepts() {
+        let key = russh::keys::PublicKey::from_openssh(TEST_PUBLIC_KEY)
+            .expect("fixed test key must parse");
+        let fp = fingerprint(&key);
+        let slot = Arc::new(Mutex::new(None));
+        let mut handler = ProbeHandler { slot: slot.clone() };
+        assert!(handler
+            .check_server_key(&key)
+            .await
+            .expect("no handler error"));
+        assert_eq!(slot.lock().unwrap().as_deref(), Some(fp.as_str()));
     }
 }

@@ -58,9 +58,26 @@ pub async fn test_connection(
     state: State<'_, Arc<AppState>>,
     params: ConnectParams,
 ) -> Result<String> {
+    // SSH 隧道开启但尚无 TOFU 指纹：要求前端先走探针确认（probe_host_key）
+    if let Some(ssh) = &params.ssh {
+        if ssh.enabled && ssh.host_key_fingerprint.is_none() {
+            return Err(DbError::Config("需先确认 SSH 主机指纹".to_string()));
+        }
+    }
     let driver = state.registry.resolve(&params.driver)?;
     let conn = driver.connect(&params).await?;
     Ok(conn.server_version())
+}
+
+/// 只读探针：连 SSH 完成 kex 取主机公钥指纹即断开（不认证、不转发），
+/// 供前端首次连接展示 `SHA256:…` 并确认（TOFU）。
+#[tauri::command]
+pub async fn probe_host_key(params: ConnectParams) -> Result<String> {
+    let ssh = params
+        .ssh
+        .as_ref()
+        .ok_or_else(|| DbError::Config("未配置 SSH".to_string()))?;
+    dby_driver_mysql::probe_host_key(ssh).await
 }
 
 #[tauri::command]

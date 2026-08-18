@@ -9,7 +9,7 @@ use dby_core::dialect::Dialect;
 use dby_core::driver::{Capabilities, ConnectParams, Connection, Driver};
 use dby_core::error::{DbError, Result};
 use dby_core::metadata::{
-    ColumnInfo, ForeignKeyInfo, IndexInfo, ProcedureInfo, TableInfo, TriggerInfo,
+    ColumnInfo, ColumnType, ForeignKeyInfo, IndexInfo, ProcedureInfo, TableInfo, TriggerInfo,
 };
 use dby_core::query::{ExecOpts, ResultSink, StreamEvent};
 use dby_core::value::Value;
@@ -327,7 +327,7 @@ impl Connection for MysqlConnection {
 fn row_to_values(row: &Row) -> Vec<Value> {
     (0..row.len())
         .map(|i| match row.get::<mysql_async::Value, usize>(i) {
-            Some(v) => conv::mysql_value_to_dby(&v),
+            Some(v) => conv::mysql_value_to_dby(&v, &ColumnType::unknown()),
             None => Value::Null,
         })
         .collect()

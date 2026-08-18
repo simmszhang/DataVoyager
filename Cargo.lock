@@ -888,6 +888,7 @@ dependencies = [
  "dby-core",
  "mysql_async",
  "russh",
+ "serde_json",
  "tokio",
 ]
 

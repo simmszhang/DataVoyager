@@ -144,6 +144,7 @@ impl Connection for MysqlConnection {
             .map(|r| ColumnInfo {
                 name: conv::row_string(&r, 0).unwrap_or_default(),
                 type_name: conv::row_string(&r, 1).unwrap_or_default(),
+                column_type: None,
                 nullable: conv::row_string(&r, 2).map(|v| v == "YES"),
                 primary_key: conv::row_string(&r, 3).map(|v| v == "PRI"),
                 default: conv::row_string(&r, 4),
@@ -268,6 +269,7 @@ impl Connection for MysqlConnection {
                 .map(|c| ColumnInfo {
                     name: c.name_str().to_string(),
                     type_name: MysqlDialect.display_type_name(&format!("{:?}", c.column_type())),
+                    column_type: None,
                     nullable: None,
                     primary_key: None,
                     default: None,

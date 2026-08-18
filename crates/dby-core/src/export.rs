@@ -123,6 +123,7 @@ mod tests {
         ColumnInfo {
             name: name.into(),
             type_name: "text".into(),
+            column_type: None,
             nullable: None,
             primary_key: None,
             default: None,

@@ -201,6 +201,7 @@ mod tests {
         sink.on_event(StreamEvent::Columns(vec![ColumnInfo {
             name: "id".into(),
             type_name: "int".into(),
+            column_type: None,
             nullable: None,
             primary_key: None,
             default: None,

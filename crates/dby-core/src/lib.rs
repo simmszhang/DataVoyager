@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod danger;
+pub mod ddl;
 pub mod dialect;
 pub mod driver;
 pub mod edit;

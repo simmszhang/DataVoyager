@@ -133,6 +133,79 @@ async fn metadata_crud_transaction() {
 }
 
 #[tokio::test]
+#[ignore = "requires MySQL; see deploy/database/README.md"]
+async fn ddl_database_and_table() {
+    use dby_core::ddl;
+    let driver = MysqlDriver;
+    let mut conn = driver.connect(&params()).await.expect("connect failed");
+    let dialect = driver.dialect();
+
+    // 建库
+    execute_buffered(
+        conn.as_mut(),
+        None,
+        &ddl::build_create_database(dialect, "dby_ddl_test"),
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+
+    // 建表
+    let cols = vec![
+        ddl::ColumnDef {
+            name: "id".into(),
+            type_name: "INT".into(),
+            nullable: false,
+            primary_key: true,
+        },
+        ddl::ColumnDef {
+            name: "name".into(),
+            type_name: "VARCHAR(64)".into(),
+            nullable: true,
+            primary_key: false,
+        },
+    ];
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_ddl_test"),
+        &ddl::build_create_table(dialect, "t1", &cols),
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+
+    // 改表名
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_ddl_test"),
+        &ddl::build_rename_table(dialect, "t1", "t2"),
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+    let tables = conn.tables("dby_ddl_test").await.unwrap();
+    assert!(tables.iter().any(|t| t.name == "t2"));
+
+    // 删表 + 删库
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_ddl_test"),
+        &ddl::build_drop_table(dialect, "t2"),
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+    execute_buffered(
+        conn.as_mut(),
+        None,
+        &ddl::build_drop_database(dialect, "dby_ddl_test"),
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 #[ignore = "requires MySQL 8.0; see deploy/database/README.md"]
 async fn streaming_cancel_and_reuse() {
     let driver = MysqlDriver;

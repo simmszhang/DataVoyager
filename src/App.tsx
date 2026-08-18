@@ -3,7 +3,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { api, CellValue, DriverInfo, SavedConnection, StreamEvent } from "./api";
 import { useStore } from "./store";
 import ConnectionDialog from "./components/ConnectionDialog";
-import SchemaPanel from "./components/SchemaPanel";
+import SchemaTree from "./components/SchemaTree";
 import QueryEditor from "./components/QueryEditor";
 import ResultsGrid from "./components/ResultsGrid";
 import ExportDialog from "./components/ExportDialog";
@@ -80,7 +80,7 @@ export default function App() {
     }
   }
 
-  /// 连接成功后：刷新连接列表 + 打开标签 + 加载元数据。
+  /// 连接成功后：刷新连接列表 + 打开标签。
   async function finishConnect() {
     const list = await api.listConnections();
     setConnections(list);
@@ -88,27 +88,10 @@ export default function App() {
     if (!newest) return;
     openConnection(newest);
     setStatus(`已连接 ${newest.name}（${newest.server_version}）`);
-    await loadDatabases(newest.id);
-    const db = newest.database;
-    if (db) {
-      updateWorkspace(newest.id, { selectedDb: db });
-      try {
-        const tbls = await api.listTables(newest.id, db);
-        updateWorkspace(newest.id, { tables: tbls });
-      } catch (e) {
-        updateWorkspace(newest.id, { error: String(e) });
-      }
+    if (newest.database) {
+      updateWorkspace(newest.id, { selectedDb: newest.database });
     }
     await refreshSaved();
-  }
-
-  async function loadDatabases(id: number) {
-    try {
-      const dbs = await api.listDatabases(id);
-      updateWorkspace(id, { databases: dbs });
-    } catch (e) {
-      updateWorkspace(id, { error: String(e) });
-    }
   }
 
   async function handleConnected() {
@@ -138,52 +121,18 @@ export default function App() {
     }
   }
 
-  async function handleSelectConnection(id: number) {
+  function handleSelectConnection(id: number) {
     const conn = connections.find((c) => c.id === id);
-    openConnection(conn!);
-    if (workspaces[id]) return; // 已打开过，直接切
-    await loadDatabases(id);
-    const db = conn?.database ?? "";
-    if (db) {
-      updateWorkspace(id, { selectedDb: db });
-      try {
-        const tbls = await api.listTables(id, db);
-        updateWorkspace(id, { tables: tbls });
-      } catch (e) {
-        updateWorkspace(id, { error: String(e) });
-      }
-    }
+    if (conn) openConnection(conn);
   }
 
-  async function handleSelectDb(db: string) {
-    if (!activeId) return;
-    updateWorkspace(activeId, { selectedDb: db, selectedTable: null, columns: [] });
-    if (!db) {
-      updateWorkspace(activeId, { tables: [] });
-      return;
-    }
-    try {
-      const tbls = await api.listTables(activeId, db);
-      updateWorkspace(activeId, { tables: tbls });
-    } catch (e) {
-      updateWorkspace(activeId, { error: String(e) });
-    }
-  }
-
-  async function handleSelectTable(table: string) {
-    if (!activeId) return;
-    updateWorkspace(activeId, { selectedTable: table });
-    const db = workspaces[activeId]?.selectedDb ?? "";
-    if (!db) return;
-    try {
-      const cols = await api.listColumns(activeId, db, table);
-      updateWorkspace(activeId, {
-        columns: cols,
-        query: `SELECT * FROM \`${table}\` LIMIT 100;`,
-      });
-    } catch (e) {
-      updateWorkspace(activeId, { error: String(e) });
-    }
+  /// 树节点点击表：设置该连接的默认库 + 编辑区查询。
+  function handleOpenTable(connId: number, database: string, table: string) {
+    updateWorkspace(connId, {
+      selectedDb: database,
+      selectedTable: table,
+      query: `SELECT * FROM \`${table}\` LIMIT 100;`,
+    });
   }
 
   async function runQuery(id: number, sql: string) {
@@ -516,21 +465,13 @@ export default function App() {
               +
             </button>
           </div>
-          <div className="conn-list">
-            {visibleConnections.map((c) => (
-              <div
-                key={c.id}
-                className={`list-item conn ${activeId === c.id ? "active" : ""}`}
-                onClick={() => handleSelectConnection(c.id)}
-                title={c.server_version}
-              >
-                <span className="conn-dot" />
-                <span className="ellipsis">{c.name}</span>
-                <span className="conn-driver">{c.driver_id}</span>
-              </div>
-            ))}
-            {visibleConnections.length === 0 && <div className="empty">暂无连接</div>}
-          </div>
+          <SchemaTree
+            connections={visibleConnections}
+            activeId={activeId}
+            onSelectConnection={handleSelectConnection}
+            onDisconnect={handleDisconnect}
+            onOpenTable={handleOpenTable}
+          />
 
           <div className="sidebar-head">
             <span className="section-title">已保存</span>
@@ -560,20 +501,6 @@ export default function App() {
               <div className="empty">无已保存连接</div>
             )}
           </div>
-
-          {activeConn && ws && (
-            <SchemaPanel
-              databases={ws.databases}
-              tables={ws.tables}
-              columns={ws.columns}
-              selectedDb={ws.selectedDb}
-              selectedTable={ws.selectedTable}
-              loading={false}
-              onSelectDb={handleSelectDb}
-              onSelectTable={handleSelectTable}
-              onRefresh={() => loadDatabases(activeConn.id)}
-            />
-          )}
         </aside>
 
         <main className="main">

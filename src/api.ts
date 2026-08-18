@@ -200,6 +200,13 @@ export type DangerLevel =
   | { level: "warn" }
   | { level: "dangerous"; reasons: string[] };
 
+export interface ColumnDef {
+  name: string;
+  type_name: string;
+  nullable?: boolean;
+  primary_key?: boolean;
+}
+
 export const api = {
   listDrivers: () => invoke<DriverInfo[]>("list_drivers"),
   testConnection: (params: ConnectParams) =>
@@ -256,6 +263,17 @@ export const api = {
     pk: [string, CellValue][],
     set: [string, CellValue][],
   ) => invoke<QueryOutput>("execute_edit", { id, database, table, pk, set }),
+
+  createDatabase: (id: number, name: string) =>
+    invoke<QueryOutput>("create_database", { id, name }),
+  dropDatabase: (id: number, name: string) =>
+    invoke<QueryOutput>("drop_database", { id, name }),
+  createTable: (id: number, database: string, name: string, columns: ColumnDef[]) =>
+    invoke<QueryOutput>("create_table", { id, database, name, columns }),
+  renameTable: (id: number, database: string, oldName: string, newName: string) =>
+    invoke<QueryOutput>("rename_table", { id, database, oldName, newName }),
+  dropTable: (id: number, database: string, name: string) =>
+    invoke<QueryOutput>("drop_table", { id, database, name }),
 
   listProjects: () => invoke<Project[]>("list_projects"),
   createProject: (name: string) => invoke<Project>("create_project", { name }),

@@ -6,7 +6,8 @@ use tauri::State;
 
 use dby_core::danger::DangerLevel;
 use dby_core::config::ConnectionConfig;
-use dby_core::driver::{execute_buffered, ConnectParams, DriverInfo};
+use dby_core::ddl::ColumnDef;
+use dby_core::driver::{execute_buffered, ConnectParams, Driver, DriverInfo};
 use dby_core::error::{DbError, Result};
 use dby_core::history::{ExecutionRecord, HistoryFilter, StatementHit};
 use dby_core::metadata::{ColumnInfo, TableInfo};
@@ -632,6 +633,125 @@ pub async fn execute_edit(
             Err(e)
         }
     }
+}
+
+// ---------- DDL（Schema 管理） ----------
+
+async fn driver_for(state: &Arc<AppState>, id: u64) -> Result<Arc<dyn Driver>> {
+    let driver_id = {
+        let guard = state.connections.lock().await;
+        guard
+            .get(&id)
+            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?
+            .driver_id
+            .clone()
+    };
+    state.registry.resolve(&driver_id)
+}
+
+async fn run_ddl(
+    state: &Arc<AppState>,
+    id: u64,
+    database: Option<String>,
+    sql: String,
+) -> Result<QueryOutput> {
+    let started = Utc::now();
+    let (project_id, conn_name, result) = {
+        let mut guard = state.connections.lock().await;
+        let active = guard
+            .get_mut(&id)
+            .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+        let project_id = active.project_id.clone();
+        let conn_name = active.name.clone();
+        let result = execute_buffered(
+            active.conn.as_mut(),
+            database.as_deref(),
+            &sql,
+            &ExecOpts::default(),
+        )
+        .await;
+        (project_id, conn_name, result)
+    };
+
+    let duration_ms = (Utc::now() - started).num_milliseconds().max(0) as u64;
+    let mut rec = ExecutionRecord::new(project_id, sql, SqlOrigin::SchemaEdit);
+    rec.connection_id = Some(id.to_string());
+    rec.connection_name = Some(conn_name);
+    rec.database = database.clone();
+    rec.duration_ms = duration_ms;
+    match result {
+        Ok(o) => {
+            rec.status = "ok".to_string();
+            rec.rows_affected = o.affected_rows;
+            let _ = state.history.record(&rec);
+            Ok(o)
+        }
+        Err(e) => {
+            rec.status = e.to_string();
+            let _ = state.history.record(&rec);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn create_database(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    name: String,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_create_database(driver.dialect(), &name);
+    run_ddl(state.inner(), id, None, sql).await
+}
+
+#[tauri::command]
+pub async fn drop_database(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    name: String,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_drop_database(driver.dialect(), &name);
+    run_ddl(state.inner(), id, None, sql).await
+}
+
+#[tauri::command]
+pub async fn create_table(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    name: String,
+    columns: Vec<ColumnDef>,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_create_table(driver.dialect(), &name, &columns);
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
+pub async fn rename_table(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    old_name: String,
+    new_name: String,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_rename_table(driver.dialect(), &old_name, &new_name);
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
+pub async fn drop_table(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    name: String,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_drop_table(driver.dialect(), &name);
+    run_ddl(state.inner(), id, Some(database), sql).await
 }
 
 // ---------- 导出 ----------

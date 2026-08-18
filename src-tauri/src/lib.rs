@@ -38,6 +38,7 @@ pub fn run() {
             commands::list_saved_connections,
             commands::reconnect,
             commands::delete_saved_connection,
+            commands::update_saved_connection,
             commands::list_databases,
             commands::list_tables,
             commands::list_columns,

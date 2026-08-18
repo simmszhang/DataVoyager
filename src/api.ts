@@ -176,6 +176,21 @@ export interface SavedConnection {
   color?: string | null;
 }
 
+/// update_saved_connection 的载荷：全部可选，只传需要修改的字段（#63）。
+/// 仅非敏感字段：敏感凭据（密码/私钥）不进此载荷，走 connect/凭据更新单独处理。
+export interface SavedConnectionUpdate {
+  name?: string;
+  color?: string;
+  ssh?: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    user: string;
+    /** TOFU 已信任主机指纹（OpenSSH 风格 "SHA256:…"） */
+    host_key_fingerprint?: string;
+  } | null;
+}
+
 // ---------- 历史 ----------
 
 export interface StatementHit {
@@ -235,6 +250,8 @@ export const api = {
   reconnect: (configId: string) => invoke<ConnectResponse>("reconnect", { configId }),
   deleteSavedConnection: (configId: string) =>
     invoke<void>("delete_saved_connection", { configId }),
+  updateSavedConnection: (configId: string, update: SavedConnectionUpdate) =>
+    invoke<void>("update_saved_connection", { configId, update }),
 
   listDatabases: (id: number) => invoke<string[]>("list_databases", { id }),
   listTables: (id: number, database: string) =>

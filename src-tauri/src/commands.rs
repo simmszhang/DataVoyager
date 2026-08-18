@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use dby_core::danger::DangerLevel;
@@ -408,6 +408,46 @@ pub async fn delete_saved_connection(
         cfg.save(&state.config_path)?;
     }
     delete_secrets(&config_id);
+    Ok(())
+}
+
+/// 已保存连接的更新载荷（design §4.7，#63）：仅非敏感字段——
+/// 敏感凭据（MySQL 密码 / SSH 密码 / SSH 私钥）走 `store_secrets` 单独更新，不进此结构。
+#[derive(Deserialize)]
+pub struct UpdateSavedConnection {
+    pub name: Option<String>,
+    pub color: Option<String>,
+    pub ssh: Option<dby_core::driver::SshOptions>,
+}
+
+/// 纯映射：把 `UpdateSavedConnection` 的 Some 字段覆盖到 config；
+/// None 字段保持原值；`id` 等标识字段绝不被改写（#63）。
+fn apply_update(config: &mut ConnectionConfig, update: &UpdateSavedConnection) {
+    if let Some(name) = &update.name {
+        config.name = name.clone();
+    }
+    if let Some(color) = &update.color {
+        config.color = Some(color.clone());
+    }
+    if let Some(ssh) = &update.ssh {
+        config.ssh = Some(ssh.clone());
+    }
+}
+
+#[tauri::command]
+pub async fn update_saved_connection(
+    state: State<'_, Arc<AppState>>,
+    config_id: String,
+    update: UpdateSavedConnection,
+) -> Result<()> {
+    let mut cfg = state.config.lock().await;
+    let config = cfg
+        .connections
+        .iter_mut()
+        .find(|c| c.id == config_id)
+        .ok_or_else(|| DbError::Config("连接配置不存在".to_string()))?;
+    apply_update(config, &update);
+    cfg.save(&state.config_path)?;
     Ok(())
 }
 
@@ -1278,6 +1318,45 @@ mod tests {
             cfg.connections.iter().any(|c| c.id == "cfg-saved-1"),
             "拒绝后已保存连接必须保留"
         );
+    }
+
+    /// `apply_update`：把 `UpdateSavedConnection` 的 Some 字段映射到 config（#63）。
+    /// name/color 有值则覆盖；ssh=None 时保留原 ssh（不清空）；id 绝不被改写。
+    #[test]
+    fn update_saved_connection_changes_name_and_color() {
+        let mut config = ConnectionConfig {
+            id: "c1".to_string(),
+            project_id: "p1".to_string(),
+            name: "old-name".to_string(),
+            driver: "mysql".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 3306,
+            user: "root".to_string(),
+            database: None,
+            ssl: None,
+            ssh: Some(dby_core::driver::SshOptions {
+                enabled: true,
+                host: "10.0.0.1".to_string(),
+                port: 22,
+                user: "ubuntu".to_string(),
+                ..Default::default()
+            }),
+            color: None,
+            params: std::collections::HashMap::new(),
+        };
+        let update = UpdateSavedConnection {
+            name: Some("new-name".to_string()),
+            color: Some("#ff0000".to_string()),
+            ssh: None,
+        };
+
+        apply_update(&mut config, &update);
+
+        assert_eq!(config.name, "new-name");
+        assert_eq!(config.color.as_deref(), Some("#ff0000"));
+        let ssh = config.ssh.as_ref().expect("ssh 应保留");
+        assert_eq!(ssh.host, "10.0.0.1");
+        assert_eq!(config.id, "c1", "id 不得被改写");
     }
 
     /// 无 SSH 配置时，即使 secrets 为空也不得凭空产生 ssh/密码。

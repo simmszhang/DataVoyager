@@ -213,6 +213,23 @@
 
 按上文「分档总表」执行：**档位 C（需统一方案）→ B（需评审）→ A（直接修）**。C 组 10 个方案组（#9/#22/#48/#1/#4/#5/#24/#28/#45/#18）优先定方案并评审；B 组逐条写简短方案评审；A 组直接修。每批评审 + 修复 + 测试闭环。
 
+### 方案文档索引（档位 C）
+
+> C 组 10 个方案组的 `design.md`（设计文档）+ `plan.md`（实现计划）见 [`plans/README.md`](./plans/README.md)（含跨方案共享契约 S1–S6 与模板）。评审顺序：第一梯队 #9/#22/#48/#1/#5 → 第二梯队 #24/#28/#45/#4 → 第三梯队 #18。
+
+| # | 方案组 | 设计文档 / 实现计划 |
+| --- | --- | --- |
+| #9 | SSH 主机密钥 TOFU | [`design`](./plans/09-ssh-host-key-tofu/design.md) · [`plan`](./plans/09-ssh-host-key-tofu/plan.md) |
+| #22 | SSH 凭据存储 | [`design`](./plans/22-ssh-credential-storage/design.md) · [`plan`](./plans/22-ssh-credential-storage/plan.md) |
+| #48 | CSP + ACL 门控 | [`design`](./plans/48-csp-acl/design.md) · [`plan`](./plans/48-csp-acl/plan.md) |
+| #1 | Value 类型映射 | [`design`](./plans/01-value-type-mapping/design.md) · [`plan`](./plans/01-value-type-mapping/plan.md) |
+| #4 | 方言感知 SQL | [`design`](./plans/04-dialect-aware-sql/design.md) · [`plan`](./plans/04-dialect-aware-sql/plan.md) |
+| #5 | 取消秒断 | [`design`](./plans/05-cancel-sec-break/design.md) · [`plan`](./plans/05-cancel-sec-break/plan.md) |
+| #24 | SSH 隧道生命周期 | [`design`](./plans/24-ssh-tunnel-lifecycle/design.md) · [`plan`](./plans/24-ssh-tunnel-lifecycle/plan.md) |
+| #28 | 多结果集协议 | [`design`](./plans/28-multi-resultset/design.md) · [`plan`](./plans/28-multi-resultset/plan.md) |
+| #45 | 数值精度 | [`design`](./plans/45-numeric-precision/design.md) · [`plan`](./plans/45-numeric-precision/plan.md) |
+| #18 | i18n | [`design`](./plans/18-i18n/design.md) · [`plan`](./plans/18-i18n/plan.md) |
+
 ---
 
 # 评审新增缺陷（#21 起 · 来源 [`review.md`](./review.md)）

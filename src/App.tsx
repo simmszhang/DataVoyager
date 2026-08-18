@@ -177,35 +177,48 @@ export default function App() {
         case "info":
           break;
         case "result_set_end":
-          // 结果集边界：多结果集展示/切换属 Task 5，此处仅占位，不结算当前集。
+          // 结果集边界（#28）：按计划暂只展示第一组，多结果集切换属后续任务，此处仅占位。
           break;
         case "truncated":
+          // 超行数上限截断：标记 StreamResult.truncated，由 ResultsGrid 落到 UI。
           mutateResult(id, (r) => {
             r.truncated = true;
           });
           break;
-        case "done":
-          // 命令成功收尾（S4）：由 channel 终态复位 running，与 invoke 返回解耦。
+        case "done": {
+          // 命令成功收尾（S4）：由 channel 终态复位 running，与 invoke 返回解耦；
+          // 状态栏计数在此结算（design §4.5），getState 取最新流式结果（闭包可能过期）。
           updateWorkspace(id, { running: false });
+          const r = useStore.getState().workspaces[id]?.result;
+          if (r) {
+            setStatus(
+              r.columns ? `返回 ${r.rows.length} 行` : `影响 ${r.affected_rows} 行`
+            );
+          }
           break;
-        case "error":
-          // 命令失败收尾（S4/S5）：kind 供后续区分「取消」与「失败」（#29）。
-          updateWorkspace(id, { error: ev.data.message, running: false });
+        }
+        case "error": {
+          // 命令失败收尾（S4/S5）：kind 区分「取消」与「失败」（#29）——
+          // 主动取消（kind==="cancelled"）不闪错误提示，仅复位 running（invoke 拒绝路径兜底）。
+          if (ev.data.kind === "cancelled") {
+            updateWorkspace(id, { running: false });
+          } else {
+            updateWorkspace(id, { error: ev.data.message, running: false });
+          }
           break;
+        }
       }
     };
     try {
       await api.executeQueryStream(channel, id, db || null, sql, confirmed);
-      const r = workspaces[id]?.result;
-      setStatus(r && r.columns ? `返回 ${r.rows.length} 行` : `影响 ${r?.affected_rows ?? 0} 行`);
+      // 状态栏计数已移至 done 事件处理（design §4.5），invoke 返回不再结算。
     } catch (e) {
       const msg = String(e);
       // 取消（#5 秒断）：连接已毒化，下次使用自动重连 —— 提示而非报错。
+      // running 兜底复位（design §7）：channel 终止事件可能先于 invoke 拒绝到达，重复复位无害。
       const cancelled = msg.includes("cancelled");
-      updateWorkspace(id, { error: cancelled ? null : msg });
+      updateWorkspace(id, { error: cancelled ? null : msg, running: false });
       setStatus(cancelled ? "已取消，连接将自动重连" : "查询失败");
-    } finally {
-      updateWorkspace(id, { running: false });
     }
   }
 

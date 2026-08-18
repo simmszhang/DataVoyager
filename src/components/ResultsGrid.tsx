@@ -140,6 +140,7 @@ export default function ResultsGrid({ result, onEditCell }: Props) {
       <div className="result-message">
         语句执行成功，影响 {result.affected_rows} 行
         {result.last_insert_id != null && `，最后插入 ID: ${result.last_insert_id}`}
+        {result.truncated && "（结果已截断）"}
       </div>
     );
   }
@@ -152,7 +153,15 @@ export default function ResultsGrid({ result, onEditCell }: Props) {
   return (
     <div className="results">
       <div className="result-meta">
-        返回 {rows.length} 行{result.truncated ? "（已截断，仅显示前 2000 行）" : ""}
+        返回 {rows.length} 行
+        {result.truncated && (
+          <span
+            title="结果集超出单组行数上限，仅展示已接收的部分行"
+            style={{ color: "#e0a63c", fontWeight: 600 }}
+          >
+            · 结果已截断
+          </span>
+        )}
         {onEditCell && " · 双击单元格编辑"}
       </div>
       <div className="grid-wrap" ref={parentRef}>

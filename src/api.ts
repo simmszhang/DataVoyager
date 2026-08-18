@@ -5,8 +5,8 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 export type CellValue =
   | { t: "null" }
   | { t: "bool"; v: boolean }
-  | { t: "i64"; v: number }
-  | { t: "u64"; v: number }
+  | { t: "i64"; v: string }
+  | { t: "u64"; v: string }
   | { t: "f64"; v: number }
   | { t: "decimal"; v: string }
   | { t: "str"; v: string }
@@ -27,6 +27,8 @@ export function displayCell(v: CellValue): string {
       return String(v.v);
     case "i64":
     case "u64":
+      // 十进制字符串原样渲染，绝不 Number()（>2^53 无损，design §4.3）。
+      return v.v;
     case "f64":
       return String(v.v);
     case "decimal":
@@ -154,7 +156,7 @@ export interface ResultSet {
 export interface QueryOutput {
   result_sets: ResultSet[];
   affected_rows: number;
-  last_insert_id: number | null;
+  last_insert_id: string | null;
   info?: string | null;
 }
 
@@ -163,7 +165,7 @@ export interface QueryOutput {
 export type StreamEvent =
   | { event: "columns"; data: ColumnInfo[] }
   | { event: "rows"; data: CellValue[][] }
-  | { event: "affected"; data: { affected_rows: number; last_insert_id: number | null } }
+  | { event: "affected"; data: { affected_rows: number; last_insert_id: string | null } }
   | { event: "info"; data: string | null }
   | { event: "result_set_end" }
   | { event: "truncated" }
@@ -174,7 +176,7 @@ export interface StreamResult {
   columns: ColumnInfo[] | null;
   rows: CellValue[][];
   affected_rows: number;
-  last_insert_id: number | null;
+  last_insert_id: string | null;
   truncated: boolean;
 }
 

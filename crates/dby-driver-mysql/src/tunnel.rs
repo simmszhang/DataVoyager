@@ -91,6 +91,22 @@ pub struct SshTunnel {
     _task: tokio::task::JoinHandle<()>,
 }
 
+/// 认证方式：`private_key` 存在时优先公钥认证，否则回退密码认证。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthKind {
+    PublicKey,
+    Password,
+}
+
+/// 纯选择函数：`private_key` 存在 → `PublicKey`，否则 `Password`（供单测 + `start_tunnel` 分支）。
+fn pick_auth(ssh: &SshOptions) -> AuthKind {
+    if ssh.private_key.is_some() {
+        AuthKind::PublicKey
+    } else {
+        AuthKind::Password
+    }
+}
+
 /// 建立隧道：连 SSH → 认证 → 本地临时端口转发到 `target_host:target_port`。
 pub async fn start_tunnel(
     ssh: &SshOptions,
@@ -105,10 +121,31 @@ pub async fn start_tunnel(
     let mut handle = russh::client::connect(config, (ssh.host.clone(), ssh.port), handler)
         .await
         .map_err(ssh_err)?;
-    let auth = handle
-        .authenticate_password(ssh.user.clone(), ssh.password.clone().unwrap_or_default())
-        .await
-        .map_err(ssh_err)?;
+    let auth = match pick_auth(ssh) {
+        AuthKind::PublicKey => {
+            // PEM 字符串（非文件路径）；加密私钥 passphrase 暂不支持（无 passphrase 入参）
+            let pem = ssh
+                .private_key
+                .as_deref()
+                .expect("pick_auth(PublicKey) 时 private_key 必为 Some");
+            let key = russh::keys::decode_secret_key(pem, None)
+                .map_err(|e| DbError::Other(format!("SSH 私钥解析失败: {e}")))?;
+            let hash_alg = handle
+                .best_supported_rsa_hash()
+                .await
+                .map_err(ssh_err)?
+                .flatten(); // Result<Option<Option<HashAlg>>, Error> → Option<HashAlg>；RSA 取 rsa-sha2-256/512，非 RSA 忽略
+            let key_with_alg = russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key), hash_alg);
+            handle
+                .authenticate_publickey(ssh.user.clone(), key_with_alg)
+                .await
+                .map_err(ssh_err)?
+        }
+        AuthKind::Password => handle
+            .authenticate_password(ssh.user.clone(), ssh.password.clone().unwrap_or_default())
+            .await
+            .map_err(ssh_err)?,
+    };
     if !matches!(auth, russh::client::AuthResult::Success) {
         return Err(DbError::Other("SSH 认证失败".to_string()));
     }
@@ -170,6 +207,23 @@ mod tests {
     /// `TEST_PUBLIC_KEY` 不同，用于「指纹不匹配」用例。
     const TEST_PUBLIC_KEY_B: &str =
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ";
+
+    /// `pick_auth`：有 `private_key` 时选 `PublicKey`。
+    #[test]
+    fn pick_auth_with_private_key_selects_public_key() {
+        let ssh = SshOptions {
+            private_key: Some("-----BEGIN OPENSSH PRIVATE KEY-----".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(pick_auth(&ssh), AuthKind::PublicKey);
+    }
+
+    /// `pick_auth`：无 `private_key` 时选 `Password`。
+    #[test]
+    fn pick_auth_without_private_key_selects_password() {
+        let ssh = SshOptions::default();
+        assert_eq!(pick_auth(&ssh), AuthKind::Password);
+    }
 
     #[test]
     fn fingerprint_matches_openssh_form() {

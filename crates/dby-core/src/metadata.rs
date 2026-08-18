@@ -61,6 +61,14 @@ pub struct ColumnType {
     pub collation: Option<String>,
 }
 
+impl ColumnType {
+    /// 无类型信息列的兜底构造器（`base: Unknown`，其余字段取默认）。
+    /// 转换走 legacy 启发式，`display_type_name` 回退 `type_name` 原文。
+    pub fn unknown() -> Self {
+        ColumnType::default()
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ColumnInfo {
     pub name: String,

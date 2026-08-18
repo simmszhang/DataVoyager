@@ -222,7 +222,7 @@ async fn streaming_cancel_and_reuse() {
     let driver = MysqlDriver;
     let mut conn = driver.connect(&params()).await.expect("connect failed");
 
-    // 长查询：递归 CTE 产生大量行（MySQL 8.0），取消后连接仍可复用。
+    // 长查询：递归 CTE 产生大量行（MySQL 8.0），取消后连接毒化（秒断，不可复用）。
     let cancel = CancellationToken::new();
     let cancel_clone = cancel.clone();
     let opts = ExecOpts {
@@ -248,13 +248,89 @@ async fn streaming_cancel_and_reuse() {
         matches!(res, Err(DbError::Cancelled)),
         "expected cancellation, got {res:?}"
     );
-    // 取消后连接可复用
-    conn.ping()
-        .await
-        .expect("connection should be reusable after cancel");
-    let out = execute_buffered(conn.as_mut(), None, "SELECT 1 AS one", &ExecOpts::default())
-        .await
-        .unwrap();
+    // #5 秒断：取消即关 socket，连接毒化 —— ping 报 ConnectionNotFound（不再可复用）。
+    assert!(
+        matches!(conn.ping().await, Err(DbError::ConnectionNotFound(_))),
+        "cancel must poison the connection (sec-break)"
+    );
+    // 自动重连（壳层 ensure_connected 的驱动级等价）：新连接 SELECT 1 成功。
+    let mut conn2 = driver.connect(&params()).await.expect("reconnect failed");
+    let out = execute_buffered(
+        conn2.as_mut(),
+        None,
+        "SELECT 1 AS one",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        out.first_result_set().unwrap().rows[0][0].to_display_string(),
+        "1"
+    );
+}
+
+/// #5 秒断即时性：`SELECT SLEEP(60)` 取消必须在 <2s 返回（非 drain 排空），
+/// 取消即关 socket 毒化连接；重连后同连接 SELECT 1 成功（壳层 `ensure_connected` 的驱动级等价）。
+///
+/// 环境守卫：未设置 `DBY_TEST_MYSQL_*` 时跳过（CI 无 MySQL；`--ignored` 手动运行时
+/// 未配置环境也不误连默认值）。
+#[tokio::test]
+#[ignore = "requires MySQL; see deploy/database/README.md"]
+async fn select_sleep_cancel_is_prompt_and_reconnects() {
+    if std::env::var("DBY_TEST_MYSQL_HOST").is_err()
+        && std::env::var("DBY_TEST_MYSQL_PORT").is_err()
+        && std::env::var("DBY_TEST_MYSQL_PASSWORD").is_err()
+    {
+        eprintln!("skip: DBY_TEST_MYSQL_* 未设置（无真实 MySQL）");
+        return;
+    }
+
+    let driver = MysqlDriver;
+    let mut conn = driver.connect(&params()).await.expect("connect failed");
+
+    // SELECT SLEEP(60)：100ms 后取消；断言 Cancelled 且耗时 < 2s（秒断，非 drain）。
+    let cancel = CancellationToken::new();
+    let cancel_clone = cancel.clone();
+    let opts = ExecOpts {
+        cancel: Some(cancel_clone),
+        ..Default::default()
+    };
+    let canceller = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        cancel.cancel();
+    });
+    let started = std::time::Instant::now();
+    let mut sink = CountingSink { rows: 0 };
+    let res = conn
+        .execute_stream(None, "SELECT SLEEP(60)", &opts, &mut sink)
+        .await;
+    let elapsed = started.elapsed();
+    canceller.await.unwrap();
+    assert!(
+        matches!(res, Err(DbError::Cancelled)),
+        "expected cancellation, got {res:?}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "cancel must be prompt (<2s, sec-break not drain), took {elapsed:?}"
+    );
+
+    // 取消即关 socket：连接毒化，ping 报 ConnectionNotFound。
+    assert!(
+        matches!(conn.ping().await, Err(DbError::ConnectionNotFound(_))),
+        "cancel must poison the connection"
+    );
+
+    // 自动重连：新连接 SELECT 1 成功。
+    let mut conn2 = driver.connect(&params()).await.expect("reconnect failed");
+    let out = execute_buffered(
+        conn2.as_mut(),
+        None,
+        "SELECT 1 AS one",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         out.first_result_set().unwrap().rows[0][0].to_display_string(),
         "1"

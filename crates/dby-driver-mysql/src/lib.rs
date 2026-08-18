@@ -85,7 +85,7 @@ impl Driver for MysqlDriver {
         let conn = Conn::new(opts).await.map_err(db_err)?;
         let (major, minor, patch) = conn.server_version();
         Ok(Box::new(MysqlConnection {
-            conn,
+            conn: Some(conn),
             version: format!("{major}.{minor}.{patch}"),
             _ssh: ssh,
         }))
@@ -93,7 +93,8 @@ impl Driver for MysqlDriver {
 }
 
 pub struct MysqlConnection {
-    conn: Conn,
+    /// `None` = 连接已被取消关闭（秒断，毒化）：下次使用前须重连（壳层 `ensure_connected`）。
+    conn: Option<Conn>,
     version: String,
     _ssh: Option<tunnel::SshTunnel>,
 }
@@ -101,7 +102,12 @@ pub struct MysqlConnection {
 #[async_trait]
 impl Connection for MysqlConnection {
     async fn ping(&mut self) -> Result<()> {
-        self.conn.ping().await.map_err(db_err)
+        self.conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .ping()
+            .await
+            .map_err(db_err)
     }
 
     fn server_version(&self) -> String {
@@ -113,7 +119,13 @@ impl Connection for MysqlConnection {
     }
 
     async fn schemas(&mut self, _catalog: Option<&str>) -> Result<Vec<String>> {
-        let rows: Vec<Row> = self.conn.query("SHOW DATABASES").await.map_err(db_err)?;
+        let rows: Vec<Row> = self
+            .conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .query("SHOW DATABASES")
+            .await
+            .map_err(db_err)?;
         Ok(rows
             .into_iter()
             .filter_map(|r| conv::row_string(&r, 0))
@@ -123,7 +135,13 @@ impl Connection for MysqlConnection {
     async fn tables(&mut self, schema: &str) -> Result<Vec<TableInfo>> {
         let sql = "SELECT TABLE_NAME, TABLE_TYPE, TABLE_COMMENT \
                    FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME";
-        let rows: Vec<Row> = self.conn.exec(sql, (schema,)).await.map_err(db_err)?;
+        let rows: Vec<Row> = self
+            .conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .exec(sql, (schema,))
+            .await
+            .map_err(db_err)?;
         Ok(rows
             .into_iter()
             .map(|r| TableInfo {
@@ -142,7 +160,13 @@ impl Connection for MysqlConnection {
                    CHARACTER_SET_NAME, COLLATION_NAME \
                    FROM information_schema.COLUMNS \
                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION";
-        let rows: Vec<Row> = self.conn.exec(sql, (schema, table)).await.map_err(db_err)?;
+        let rows: Vec<Row> = self
+            .conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .exec(sql, (schema, table))
+            .await
+            .map_err(db_err)?;
         Ok(rows
             .into_iter()
             .map(|r| {
@@ -192,7 +216,13 @@ impl Connection for MysqlConnection {
             MysqlDialect.quote_identifier(table),
             MysqlDialect.quote_identifier(schema)
         );
-        let rows: Vec<Row> = self.conn.query(sql).await.map_err(db_err)?;
+        let rows: Vec<Row> = self
+            .conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .query(sql)
+            .await
+            .map_err(db_err)?;
         let mut indexes: Vec<IndexInfo> = Vec::new();
         for r in &rows {
             let name = conv::row_string(r, 2).unwrap_or_default();
@@ -217,7 +247,13 @@ impl Connection for MysqlConnection {
                    FROM information_schema.KEY_COLUMN_USAGE \
                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL \
                    ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION";
-        let rows: Vec<Row> = self.conn.exec(sql, (schema, table)).await.map_err(db_err)?;
+        let rows: Vec<Row> = self
+            .conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .exec(sql, (schema, table))
+            .await
+            .map_err(db_err)?;
         let mut fks: Vec<ForeignKeyInfo> = Vec::new();
         for r in &rows {
             let name = conv::row_string(r, 0).unwrap_or_default();
@@ -243,7 +279,13 @@ impl Connection for MysqlConnection {
         let sql = "SELECT TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION \
                    FROM information_schema.TRIGGERS \
                    WHERE TRIGGER_SCHEMA = ? AND EVENT_OBJECT_TABLE = ? ORDER BY TRIGGER_NAME";
-        let rows: Vec<Row> = self.conn.exec(sql, (schema, table)).await.map_err(db_err)?;
+        let rows: Vec<Row> = self
+            .conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .exec(sql, (schema, table))
+            .await
+            .map_err(db_err)?;
         Ok(rows
             .into_iter()
             .map(|r| TriggerInfo {
@@ -257,7 +299,13 @@ impl Connection for MysqlConnection {
     async fn procedures(&mut self, schema: &str) -> Result<Vec<ProcedureInfo>> {
         let sql = "SELECT ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.ROUTINES \
                    WHERE ROUTINE_SCHEMA = ? ORDER BY ROUTINE_NAME";
-        let rows: Vec<Row> = self.conn.exec(sql, (schema,)).await.map_err(db_err)?;
+        let rows: Vec<Row> = self
+            .conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .exec(sql, (schema,))
+            .await
+            .map_err(db_err)?;
         Ok(rows
             .into_iter()
             .map(|r| ProcedureInfo {
@@ -273,7 +321,13 @@ impl Connection for MysqlConnection {
             MysqlDialect.quote_identifier(schema),
             MysqlDialect.quote_identifier(table)
         );
-        let rows: Vec<Row> = self.conn.query(sql).await.map_err(db_err)?;
+        let rows: Vec<Row> = self
+            .conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .query(sql)
+            .await
+            .map_err(db_err)?;
         rows.into_iter()
             .next()
             .and_then(|r| conv::row_string(&r, 1))
@@ -287,71 +341,55 @@ impl Connection for MysqlConnection {
         opts: &ExecOpts,
         sink: &mut dyn ResultSink,
     ) -> Result<()> {
-        if let Some(db) = schema {
-            if !db.is_empty() {
-                self.conn
-                    .query_drop(format!("USE {}", MysqlDialect.quote_identifier(db)))
-                    .await
-                    .map_err(db_err)?;
+        // 秒断（#5）：外层 select! 竞速「取消信号」与「查询本身」。
+        // `biased` + 取消分支在前：取消已置位时立即命中（sticky）。
+        // 取消命中 → select! drop 掉 run_query_stream future（`&mut Conn` 借用随之释放）
+        // → 块结束后 `self.conn.take()` 关 socket，服务端见连接关闭即中止查询，无 drain。
+        let cancelled = {
+            let conn = self
+                .conn
+                .as_mut()
+                .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?;
+            tokio::select! {
+                biased;
+                _ = cancel_signal(opts) => true,
+                res = run_query_stream(conn, schema, sql, sink, opts) => return res,
             }
-        }
-
-        let mut qr = self.conn.query_iter(sql).await.map_err(db_err)?;
-        if let Some(cols) = qr.columns() {
-            // 查询结果路径：#33 由列定义构造结构化 column_type，type_name 同源生成
-            let column_types: Vec<ColumnType> = cols.iter().map(conv::from_mysql_column).collect();
-            let columns: Vec<ColumnInfo> = cols
-                .iter()
-                .zip(&column_types)
-                .map(|(c, ct)| ColumnInfo {
-                    name: c.name_str().to_string(),
-                    type_name: MysqlDialect.display_type_name(ct),
-                    column_type: Some(ct.clone()),
-                    nullable: None,
-                    primary_key: None,
-                    default: None,
-                    comment: None,
-                })
-                .collect();
-            sink.on_event(StreamEvent::Columns(columns));
-
-            let mut batch = Vec::with_capacity(BATCH_ROWS);
-            while let Some(row) = qr.next().await.map_err(db_err)? {
-                batch.push(row_to_values(&row, &column_types));
-                if batch.len() >= BATCH_ROWS {
-                    sink.on_event(StreamEvent::Rows(std::mem::take(&mut batch)));
-                }
-                if let Some(tok) = &opts.cancel {
-                    if tok.is_cancelled() {
-                        return Err(DbError::Cancelled);
-                    }
-                }
+        };
+        if cancelled {
+            if let Some(c) = self.conn.take() {
+                drop(c); // drop Conn 直接关 socket（无 Drop impl，非优雅关闭），服务端中止
             }
-            if !batch.is_empty() {
-                sink.on_event(StreamEvent::Rows(batch));
-            }
-        } else {
-            sink.on_event(StreamEvent::Affected {
-                affected_rows: qr.affected_rows(),
-                last_insert_id: qr.last_insert_id(),
-            });
+            return Err(DbError::Cancelled);
         }
         Ok(())
     }
 
     async fn begin(&mut self) -> Result<()> {
         self.conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
             .query_drop("START TRANSACTION")
             .await
             .map_err(db_err)
     }
 
     async fn commit(&mut self) -> Result<()> {
-        self.conn.query_drop("COMMIT").await.map_err(db_err)
+        self.conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .query_drop("COMMIT")
+            .await
+            .map_err(db_err)
     }
 
     async fn rollback(&mut self) -> Result<()> {
-        self.conn.query_drop("ROLLBACK").await.map_err(db_err)
+        self.conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .query_drop("ROLLBACK")
+            .await
+            .map_err(db_err)
     }
 
     async fn set_autocommit(&mut self, enabled: bool) -> Result<()> {
@@ -360,8 +398,84 @@ impl Connection for MysqlConnection {
         } else {
             "SET autocommit = 0"
         };
-        self.conn.query_drop(sql).await.map_err(db_err)
+        self.conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .query_drop(sql)
+            .await
+            .map_err(db_err)
     }
+}
+
+/// 等待取消信号：有 token 则等 `cancelled()`（watch，无丢失唤醒）；
+/// 无 token 则永远 pending（只等查询分支完成）。
+async fn cancel_signal(opts: &ExecOpts) {
+    if let Some(c) = &opts.cancel {
+        c.cancelled().await
+    } else {
+        std::future::pending::<()>().await
+    }
+}
+
+/// 实际查询体（从 execute_stream 抽出，供外层 select! 竞速）：
+/// `USE` 前置 + `query_iter` 流式推 sink。批间 `is_cancelled()` 检查保留为防御性
+/// （正常路径下外层 select! 已即时处理，此处仅兜底）。
+async fn run_query_stream(
+    conn: &mut Conn,
+    schema: Option<&str>,
+    sql: &str,
+    sink: &mut dyn ResultSink,
+    opts: &ExecOpts,
+) -> Result<()> {
+    if let Some(db) = schema {
+        if !db.is_empty() {
+            conn.query_drop(format!("USE {}", MysqlDialect.quote_identifier(db)))
+                .await
+                .map_err(db_err)?;
+        }
+    }
+
+    let mut qr = conn.query_iter(sql).await.map_err(db_err)?;
+    if let Some(cols) = qr.columns() {
+        // 查询结果路径：#33 由列定义构造结构化 column_type，type_name 同源生成
+        let column_types: Vec<ColumnType> = cols.iter().map(conv::from_mysql_column).collect();
+        let columns: Vec<ColumnInfo> = cols
+            .iter()
+            .zip(&column_types)
+            .map(|(c, ct)| ColumnInfo {
+                name: c.name_str().to_string(),
+                type_name: MysqlDialect.display_type_name(ct),
+                column_type: Some(ct.clone()),
+                nullable: None,
+                primary_key: None,
+                default: None,
+                comment: None,
+            })
+            .collect();
+        sink.on_event(StreamEvent::Columns(columns));
+
+        let mut batch = Vec::with_capacity(BATCH_ROWS);
+        while let Some(row) = qr.next().await.map_err(db_err)? {
+            batch.push(row_to_values(&row, &column_types));
+            if batch.len() >= BATCH_ROWS {
+                sink.on_event(StreamEvent::Rows(std::mem::take(&mut batch)));
+            }
+            if let Some(tok) = &opts.cancel {
+                if tok.is_cancelled() {
+                    return Err(DbError::Cancelled);
+                }
+            }
+        }
+        if !batch.is_empty() {
+            sink.on_event(StreamEvent::Rows(batch));
+        }
+    } else {
+        sink.on_event(StreamEvent::Affected {
+            affected_rows: qr.affected_rows(),
+            last_insert_id: qr.last_insert_id(),
+        });
+    }
+    Ok(())
 }
 
 fn row_to_values(row: &Row, column_types: &[ColumnType]) -> Vec<Value> {

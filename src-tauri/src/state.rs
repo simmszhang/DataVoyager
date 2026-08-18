@@ -18,10 +18,8 @@ pub struct ActiveConnection {
     pub database: String,
     pub server_version: String,
     /// 连接参数（secrets 仅存内存）：毒化后自动重连所需。
-    #[allow(dead_code)] // Task 5 `ensure_connected` 才读取；当前仅写入
     pub params: ConnectParams,
     /// 秒断（取消关 socket）后置 true，下次使用前由 `ensure_connected` 重连。
-    #[allow(dead_code)] // Task 5 `ensure_connected` 才读取；当前仅写入
     pub needs_reconnect: bool,
     pub conn: Box<dyn Connection + Send>,
 }

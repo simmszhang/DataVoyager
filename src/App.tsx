@@ -176,8 +176,11 @@ export default function App() {
       const r = workspaces[id]?.result;
       setStatus(r && r.columns ? `返回 ${r.rows.length} 行` : `影响 ${r?.affected_rows ?? 0} 行`);
     } catch (e) {
-      updateWorkspace(id, { error: String(e) });
-      setStatus("查询失败");
+      const msg = String(e);
+      // 取消（#5 秒断）：连接已毒化，下次使用自动重连 —— 提示而非报错。
+      const cancelled = msg.includes("cancelled");
+      updateWorkspace(id, { error: cancelled ? null : msg });
+      setStatus(cancelled ? "已取消，连接将自动重连" : "查询失败");
     } finally {
       updateWorkspace(id, { running: false });
     }

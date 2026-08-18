@@ -70,6 +70,20 @@ fn snapshot(a: &ActiveConnection) -> ConnectionSummary {
     }
 }
 
+/// 毒化自动重连（#5，design §4.7）：秒断（取消关 socket）后 `needs_reconnect = true`，
+/// 下一次使用该连接前用保存的 `params` 重连，刷新 server_version 并清除毒化标记。
+/// 各使用连接的命令在 `entry.lock().await` 之后先调用本函数。
+async fn ensure_connected(state: &Arc<AppState>, active: &mut ActiveConnection) -> Result<()> {
+    if active.needs_reconnect {
+        let driver = state.registry.resolve(&active.driver_id)?;
+        let conn = driver.connect(&active.params).await?;
+        active.conn = conn;
+        active.server_version = active.conn.server_version();
+        active.needs_reconnect = false;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_drivers(state: State<'_, Arc<AppState>>) -> Vec<DriverInfo> {
     state.registry.list()
@@ -491,6 +505,7 @@ pub async fn list_databases(state: State<'_, Arc<AppState>>, id: u64) -> Result<
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
     active.conn.schemas(None).await
 }
 
@@ -508,6 +523,7 @@ pub async fn list_tables(
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
     active.conn.tables(&database).await
 }
 
@@ -526,6 +542,7 @@ pub async fn list_columns(
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
     active.conn.columns(&database, &table).await
 }
 
@@ -560,6 +577,7 @@ pub async fn execute_query(
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
     let project_id = active.project_id.clone();
     let conn_name = active.name.clone();
     let result = execute_buffered(
@@ -591,7 +609,13 @@ pub async fn execute_query(
             Ok(output)
         }
         Err(e) => {
-            rec.status = e.to_string();
+            // 秒断：取消即关 socket，连接毒化 → 标记重连；历史 status=cancelled（#5）。
+            if matches!(e, DbError::Cancelled) {
+                active.needs_reconnect = true;
+                rec.status = "cancelled".to_string();
+            } else {
+                rec.status = e.to_string();
+            }
             if let Err(e) = state.history.record(&rec) {
                 log::warn!("写入历史记录失败: {e}");
             }
@@ -774,6 +798,7 @@ pub async fn execute_query_stream(
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
     let project_id = active.project_id.clone();
     let conn_name = active.name.clone();
     let opts = ExecOpts {
@@ -804,7 +829,13 @@ pub async fn execute_query_stream(
             Ok(())
         }
         Err(e) => {
-            rec.status = e.to_string();
+            // 秒断：取消即关 socket，连接毒化 → 标记重连；历史 status=cancelled（#5）。
+            if matches!(e, DbError::Cancelled) {
+                active.needs_reconnect = true;
+                rec.status = "cancelled".to_string();
+            } else {
+                rec.status = e.to_string();
+            }
             if let Err(e) = state.history.record(&rec) {
                 log::warn!("写入历史记录失败: {e}");
             }
@@ -875,6 +906,7 @@ pub async fn begin(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
     active.conn.begin().await
 }
 
@@ -888,6 +920,7 @@ pub async fn commit(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
     active.conn.commit().await
 }
 
@@ -901,6 +934,7 @@ pub async fn rollback(state: State<'_, Arc<AppState>>, id: u64) -> Result<()> {
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
     active.conn.rollback().await
 }
 
@@ -914,6 +948,7 @@ pub async fn set_autocommit(state: State<'_, Arc<AppState>>, id: u64, enabled: b
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
     active.conn.set_autocommit(enabled).await
 }
 
@@ -992,6 +1027,7 @@ pub async fn execute_edit(
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
     let project_id = active.project_id.clone();
     let conn_name = active.name.clone();
     let result = execute_buffered(
@@ -1057,6 +1093,7 @@ async fn run_ddl(
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state, &mut active).await?;
     let project_id = active.project_id.clone();
     let conn_name = active.name.clone();
     let result = execute_buffered(
@@ -1193,6 +1230,7 @@ pub async fn export_result(
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
     let project_id = active.project_id.clone();
     let conn_name = active.name.clone();
     let driver_id = active.driver_id.clone();
@@ -1225,7 +1263,13 @@ pub async fn export_result(
             o
         }
         Err(e) => {
-            rec.status = e.to_string();
+            // 秒断：取消即关 socket，连接毒化 → 标记重连；历史 status=cancelled（#5）。
+            if matches!(e, DbError::Cancelled) {
+                active.needs_reconnect = true;
+                rec.status = "cancelled".to_string();
+            } else {
+                rec.status = e.to_string();
+            }
             if let Err(e) = state.history.record(&rec) {
                 log::warn!("写入历史记录失败: {e}");
             }

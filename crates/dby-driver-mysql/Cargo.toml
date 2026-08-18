@@ -14,7 +14,8 @@ async-trait = "0.1"
 mysql_async = { version = "0.37", default-features = false, features = ["minimal-rust", "rustls-tls", "ring"] }
 # SSH 隧道（纯 Rust，无 libssh2 系统依赖）
 russh = "0.62"
-tokio = { version = "1", features = ["net", "io-util", "rt", "time"] }
+# `macros` 供 execute_stream 外层 `tokio::select!`（秒断，design §4.5）；`time` 供集成测试
+tokio = { version = "1", features = ["net", "io-util", "rt", "time", "macros"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

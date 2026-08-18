@@ -448,44 +448,66 @@ async fn run_query_stream(
     }
 
     let mut qr = conn.query_iter(sql).await.map_err(db_err)?;
-    if let Some(cols) = qr.columns() {
-        // 查询结果路径：#33 由列定义构造结构化 column_type，type_name 同源生成
-        let column_types: Vec<ColumnType> = cols.iter().map(conv::from_mysql_column).collect();
-        let columns: Vec<ColumnInfo> = cols
-            .iter()
-            .zip(&column_types)
-            .map(|(c, ct)| ColumnInfo {
-                name: c.name_str().to_string(),
-                type_name: MysqlDialect.display_type_name(ct),
-                column_type: Some(ct.clone()),
-                nullable: None,
-                primary_key: None,
-                default: None,
-                comment: None,
-            })
-            .collect();
-        sink.on_event(StreamEvent::Columns(columns));
+    // #28 多结果集：mysql_async 0.37 无 `next_result_set()`，按 columns 空/非空判别遍历全部结果集。
+    // 非空列 → SELECT 集；空列（OK 包 0x00，helpers.rs:69-74 存为 Some(空列)）→ DML 集；
+    // None → 无 pending（可能隐藏多语句中途 server 错误，helpers.rs:58-62 存为 pending error，
+    // columns() 对 Err 也返回 None，需再调一次 next() 用 `?` 冒错，Ok(None) 才 break）。
+    loop {
+        match qr.columns() {
+            Some(cols) if !cols.is_empty() => {
+                // 查询结果路径：#33 由列定义构造结构化 column_type，type_name 同源生成
+                let column_types: Vec<ColumnType> =
+                    cols.iter().map(conv::from_mysql_column).collect();
+                let columns: Vec<ColumnInfo> = cols
+                    .iter()
+                    .zip(&column_types)
+                    .map(|(c, ct)| ColumnInfo {
+                        name: c.name_str().to_string(),
+                        type_name: MysqlDialect.display_type_name(ct),
+                        column_type: Some(ct.clone()),
+                        nullable: None,
+                        primary_key: None,
+                        default: None,
+                        comment: None,
+                    })
+                    .collect();
+                sink.on_event(StreamEvent::Columns(columns));
 
-        let mut batch = Vec::with_capacity(BATCH_ROWS);
-        while let Some(row) = qr.next().await.map_err(db_err)? {
-            batch.push(row_to_values(&row, &column_types));
-            if batch.len() >= BATCH_ROWS {
-                sink.on_event(StreamEvent::Rows(std::mem::take(&mut batch)));
-            }
-            if let Some(tok) = &opts.cancel {
-                if tok.is_cancelled() {
-                    return Err(DbError::Cancelled);
+                let mut batch = Vec::with_capacity(BATCH_ROWS);
+                while let Some(row) = qr.next().await.map_err(db_err)? {
+                    // 集尾 next() 返回 None 时已自动 next_set()（next_row_or_next_set2），
+                    // 循环回到 match 即处理下一结果集
+                    batch.push(row_to_values(&row, &column_types));
+                    if batch.len() >= BATCH_ROWS {
+                        sink.on_event(StreamEvent::Rows(std::mem::take(&mut batch)));
+                    }
+                    if let Some(tok) = &opts.cancel {
+                        if tok.is_cancelled() {
+                            return Err(DbError::Cancelled);
+                        }
+                    }
                 }
+                if !batch.is_empty() {
+                    sink.on_event(StreamEvent::Rows(batch));
+                }
+                sink.on_event(StreamEvent::ResultSetEnd);
+            }
+            Some(_) => {
+                // DML 集（空列）：先读 affected/last_insert_id 发 Affected，再 next() 推进
+                // （空列集 next() 也会推进到下一集，连续 DML 不丢第二集）
+                sink.on_event(StreamEvent::Affected {
+                    affected_rows: qr.affected_rows(),
+                    last_insert_id: qr.last_insert_id(),
+                });
+                let _ = qr.next().await.map_err(db_err)?;
+            }
+            None => {
+                // 无 pending 结果；可能隐藏多语句中途 server 错误（pending error），
+                // 再调一次 next() 用 `?` 冒错（无 pending 则 Ok(None)），随后 break
+                let _ = qr.next().await.map_err(db_err)?;
+                break;
             }
         }
-        if !batch.is_empty() {
-            sink.on_event(StreamEvent::Rows(batch));
-        }
-    } else {
-        sink.on_event(StreamEvent::Affected {
-            affected_rows: qr.affected_rows(),
-            last_insert_id: qr.last_insert_id(),
-        });
     }
     Ok(())
 }

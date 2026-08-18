@@ -544,3 +544,161 @@ async fn dml_can_be_cancelled_and_last_insert_id_kept() {
     .await
     .unwrap();
 }
+
+/// #28 多结果集：存储过程返回 2 个 SELECT → `result_sets.len()==2` 且各行归位
+/// （驱动按 columns 空/非空判别遍历全部结果集，不再只读首个）。
+#[tokio::test]
+#[ignore = "requires MySQL; see deploy/database/README.md"]
+async fn call_procedure_yields_two_result_sets() {
+    let driver = MysqlDriver;
+    let mut conn = driver.connect(&params()).await.expect("connect failed");
+
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "DROP PROCEDURE IF EXISTS dby_multi_rs",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "CREATE PROCEDURE dby_multi_rs() BEGIN SELECT 1 AS a; SELECT 2 AS b; END",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+
+    let out = execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "CALL dby_multi_rs()",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.result_sets.len(), 2, "CALL must yield 2 result sets");
+    assert_eq!(out.result_sets[0].rows[0][0].to_display_string(), "1");
+    assert_eq!(out.result_sets[1].rows[0][0].to_display_string(), "2");
+
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "DROP PROCEDURE dby_multi_rs",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+}
+
+/// #28 多结果集：连续 DML 语句两个 Affected 都发出（不丢第二集）。
+/// 判别点：第二条 UPDATE 影响 2 行 → 顶层 `affected_rows` 必须是 2（最后结果集语义）；
+/// 旧实现只读首个结果集时停留 1/0。DML 集不得产出 Columns（无结果集）。
+#[tokio::test]
+#[ignore = "requires MySQL; see deploy/database/README.md"]
+async fn consecutive_dml_yields_both_affected() {
+    let driver = MysqlDriver;
+    let mut conn = driver.connect(&params()).await.expect("connect failed");
+
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "DROP TABLE IF EXISTS dby_multi_dml",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "CREATE TABLE dby_multi_dml (id INT PRIMARY KEY, x INT)",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "INSERT INTO dby_multi_dml (id, x) VALUES (1, 0), (2, 0)",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+
+    let mut sink = CollectingSink::new(None);
+    conn.execute_stream(
+        Some("dby_test"),
+        "UPDATE dby_multi_dml SET x = 1 WHERE id = 1; \
+         UPDATE dby_multi_dml SET x = 2 WHERE id IN (1, 2)",
+        &ExecOpts::default(),
+        &mut sink,
+    )
+    .await
+    .unwrap();
+    let out = sink.into_output();
+    // 第二条 UPDATE 影响 2 行：顶层 affected_rows 取最后结果集（=2）；若第二集被丢弃则停留 1。
+    assert_eq!(
+        out.affected_rows, 2,
+        "both DML sets must be consumed (top-level = last set)"
+    );
+    // DML 集不产 Columns：不得出现空列结果集。
+    assert!(
+        out.result_sets.is_empty(),
+        "DML must not emit Columns/result sets"
+    );
+
+    // 两条 UPDATE 都在服务端生效（多语句语义），顺序验证。
+    let check = execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "SELECT x FROM dby_multi_dml ORDER BY id",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+    let rs = check.first_result_set().unwrap();
+    assert_eq!(rs.rows[0][0].to_display_string(), "1");
+    assert_eq!(rs.rows[1][0].to_display_string(), "2");
+
+    execute_buffered(
+        conn.as_mut(),
+        Some("dby_test"),
+        "DROP TABLE dby_multi_dml",
+        &ExecOpts::default(),
+    )
+    .await
+    .unwrap();
+}
+
+/// #28 多结果集：第二集 server 错误必须经 `next()?` 冒给调用方（不静默吞）。
+/// 旧实现只读首个结果集，`SELECT 1; BLABLA` 的错误留在连接里被静默吞掉（返回 Ok）。
+#[tokio::test]
+#[ignore = "requires MySQL; see deploy/database/README.md"]
+async fn mid_stream_error_is_surfaced() {
+    let driver = MysqlDriver;
+    let mut conn = driver.connect(&params()).await.expect("connect failed");
+
+    let mut sink = CollectingSink::new(None);
+    let res = conn
+        .execute_stream(
+            Some("dby_test"),
+            "SELECT 1 AS one; BLABLA",
+            &ExecOpts::default(),
+            &mut sink,
+        )
+        .await;
+
+    // 第二集语法错误必须冒给调用方（不静默吞）。
+    let err = res.expect_err("mid-stream server error must be surfaced");
+    assert!(
+        matches!(&err, DbError::Database(msg) if msg.contains("BLABLA")),
+        "expected DbError::Database mentioning BLABLA, got {err:?}"
+    );
+    // 第一集已正常发出。
+    let out = sink.into_output();
+    assert_eq!(
+        out.first_result_set().unwrap().rows[0][0].to_display_string(),
+        "1"
+    );
+}

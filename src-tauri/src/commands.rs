@@ -10,7 +10,7 @@ use dby_core::ddl::ColumnDef;
 use dby_core::driver::{execute_buffered, ConnectParams, Driver, DriverInfo};
 use dby_core::error::{DbError, Result};
 use dby_core::history::{ExecutionRecord, HistoryFilter, StatementHit};
-use dby_core::metadata::{ColumnInfo, TableInfo};
+use dby_core::metadata::{ColumnInfo, ColumnType, TableInfo};
 use dby_core::project::Project;
 use dby_core::query::{ExecOpts, QueryOutput, ResultSink, SqlOrigin, StreamEvent};
 use tauri::ipc::Channel;
@@ -817,13 +817,28 @@ pub async fn set_autocommit(state: State<'_, Arc<AppState>>, id: u64, enabled: b
 
 // ---------- 数据编辑 ----------
 
+/// 把 `(列名, 列类型, 输入串)` 解析为 `(列名, Value)`（design §4.6，#11/#69）。
+/// 编辑提交携带「原始输入串 + 列类型」，由 `dby_core::edit::parse_value` 统一按列类型解析，
+/// 主键列同样按类型解析（BIGINT/UUID/DATE 主键不再走前端正则启发式）。
+fn parse_cells(
+    cells: &[(String, ColumnType, String)],
+) -> Result<Vec<(String, dby_core::value::Value)>> {
+    cells
+        .iter()
+        .map(|(name, ct, input)| {
+            let v = dby_core::edit::parse_value(input, ct)?;
+            Ok((name.clone(), v))
+        })
+        .collect()
+}
+
 #[tauri::command]
 pub async fn build_edit_sql(
     state: State<'_, Arc<AppState>>,
     id: u64,
     table: String,
-    pk: Vec<(String, dby_core::value::Value)>,
-    set: Vec<(String, dby_core::value::Value)>,
+    pk: Vec<(String, ColumnType, String)>,
+    set: Vec<(String, ColumnType, String)>,
 ) -> Result<String> {
     let driver_id = {
         let guard = state.connections.lock().await;
@@ -834,7 +849,14 @@ pub async fn build_edit_sql(
             .clone()
     };
     let driver = state.registry.resolve(&driver_id)?;
-    Ok(dby_core::edit::build_update(driver.dialect(), &table, &pk, &set))
+    let pk = parse_cells(&pk)?;
+    let set = parse_cells(&set)?;
+    Ok(dby_core::edit::build_update(
+        driver.dialect(),
+        &table,
+        &pk,
+        &set,
+    ))
 }
 
 #[tauri::command]
@@ -843,8 +865,8 @@ pub async fn execute_edit(
     id: u64,
     database: Option<String>,
     table: String,
-    pk: Vec<(String, dby_core::value::Value)>,
-    set: Vec<(String, dby_core::value::Value)>,
+    pk: Vec<(String, ColumnType, String)>,
+    set: Vec<(String, ColumnType, String)>,
 ) -> Result<QueryOutput> {
     let driver_id = {
         let guard = state.connections.lock().await;
@@ -855,6 +877,8 @@ pub async fn execute_edit(
             .clone()
     };
     let driver = state.registry.resolve(&driver_id)?;
+    let pk = parse_cells(&pk)?;
+    let set = parse_cells(&set)?;
     let sql = dby_core::edit::build_update(driver.dialect(), &table, &pk, &set);
 
     let started = Utc::now();
@@ -1383,5 +1407,61 @@ mod tests {
         assert!(params.password.is_none(), "无 secrets 时密码应为 None");
         assert_eq!(params.host, "db.internal");
         assert!(params.params.is_empty());
+    }
+
+    /// `parse_cells`：`(列名, 列类型, 输入串)` 按列类型解析为 `Value`，
+    /// 失败传播 `parse_value` 的 `DbError::Other`（#11/#69）。
+    #[test]
+    fn parse_cells_parses_by_column_type() {
+        use dby_core::value::Value;
+
+        let cells = vec![
+            (
+                "id".to_string(),
+                ColumnType {
+                    base: dby_core::metadata::ColumnTypeBase::I64,
+                    ..Default::default()
+                },
+                "42".to_string(),
+            ),
+            (
+                "name".to_string(),
+                ColumnType {
+                    base: dby_core::metadata::ColumnTypeBase::Str,
+                    ..Default::default()
+                },
+                "hi".to_string(),
+            ),
+            (
+                "price".to_string(),
+                ColumnType {
+                    base: dby_core::metadata::ColumnTypeBase::Decimal,
+                    ..Default::default()
+                },
+                "1.50".to_string(),
+            ),
+        ];
+
+        let parsed = parse_cells(&cells).unwrap();
+        assert_eq!(
+            parsed,
+            vec![
+                ("id".to_string(), Value::I64(42)),
+                ("name".to_string(), Value::Str("hi".to_string())),
+                ("price".to_string(), Value::Decimal("1.50".to_string())),
+            ]
+        );
+
+        // 非法输入：按列类型解析失败，错误传播（不产出正则猜测的 Str）
+        let bad = vec![(
+            "id".to_string(),
+            ColumnType {
+                base: dby_core::metadata::ColumnTypeBase::I64,
+                ..Default::default()
+            },
+            "abc".to_string(),
+        )];
+        let err = parse_cells(&bad).unwrap_err();
+        assert!(err.to_string().contains("无法将 'abc' 解析为 i64"));
     }
 }

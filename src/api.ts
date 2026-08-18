@@ -95,11 +95,55 @@ export interface TableInfo {
 export interface ColumnInfo {
   name: string;
   type_name: string;
+  column_type?: ColumnType | null;
   nullable?: boolean | null;
   primary_key?: boolean | null;
   default?: string | null;
   comment?: string | null;
 }
+
+/// 结构化列类型（与 dby-core `ColumnTypeBase` 的 serde snake_case tag 一致，#32）。
+export type ColumnTypeBase =
+  | "bool"
+  | "i8"
+  | "i16"
+  | "i32"
+  | "i64"
+  | "u8"
+  | "u16"
+  | "u32"
+  | "u64"
+  | "f32"
+  | "f64"
+  | "decimal"
+  | "str"
+  | "bytes"
+  | "date"
+  | "time"
+  | "datetime"
+  | "json"
+  | "uuid"
+  | "array"
+  | "map"
+  | "unknown";
+
+export interface ColumnType {
+  base: ColumnTypeBase;
+  numeric_precision?: number | null;
+  numeric_scale?: number | null;
+  unsigned?: boolean;
+  char_max_length?: number | null;
+  temporal_precision?: number | null;
+  charset?: string | null;
+  collation?: string | null;
+}
+
+/// 无列类型信息时的兜底（与 dby-core `ColumnType::unknown()` 序列化一致）。
+export const UNKNOWN_COLUMN_TYPE: ColumnType = { base: "unknown" };
+
+/// 编辑单元格载荷：列名 + 列类型 + 原始输入串（design §4.6，#11/#69）。
+/// 由后端 `parse_value` 按列类型解析，前端不再做正则类型猜测。
+export type EditCell = [string, ColumnType, string];
 
 export interface ResultSet {
   columns: ColumnInfo[];
@@ -286,15 +330,15 @@ export const api = {
   buildEditSql: (
     id: number,
     table: string,
-    pk: [string, CellValue][],
-    set: [string, CellValue][],
+    pk: EditCell[],
+    set: EditCell[],
   ) => invoke<string>("build_edit_sql", { id, table, pk, set }),
   executeEdit: (
     id: number,
     database: string | null,
     table: string,
-    pk: [string, CellValue][],
-    set: [string, CellValue][],
+    pk: EditCell[],
+    set: EditCell[],
   ) => invoke<QueryOutput>("execute_edit", { id, database, table, pk, set }),
 
   createDatabase: (id: number, name: string) =>

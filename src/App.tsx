@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, CellValue, DriverInfo, SavedConnection, StreamEvent } from "./api";
+import {
+  api,
+  displayCell,
+  DriverInfo,
+  EditCell,
+  SavedConnection,
+  StreamEvent,
+  UNKNOWN_COLUMN_TYPE,
+} from "./api";
 import { useStore } from "./store";
 import ConnectionDialog from "./components/ConnectionDialog";
 import SchemaTree from "./components/SchemaTree";
@@ -9,15 +17,6 @@ import ResultsGrid from "./components/ResultsGrid";
 import ExportDialog from "./components/ExportDialog";
 import HistoryPanel from "./components/HistoryPanel";
 import "./App.css";
-
-/// 用户输入的编辑值 → CellValue（NULL / 整数 / 浮点 / 字符串）。
-function toCellValue(text: string): CellValue {
-  const t = text.trim();
-  if (t.toUpperCase() === "NULL") return { t: "null" };
-  if (/^-?\d+$/.test(t)) return { t: "i64", v: Number(t) };
-  if (/^-?\d+\.\d+$/.test(t)) return { t: "f64", v: Number(t) };
-  return { t: "str", v: text };
-}
 
 export default function App() {
   const {
@@ -52,8 +51,8 @@ export default function App() {
     sql: string;
     table: string;
     database: string | null;
-    pk: [string, CellValue][];
-    set: [string, CellValue][];
+    pk: EditCell[];
+    set: EditCell[];
   } | null>(null);
 
   const activeConn = connections.find((c) => c.id === activeId) ?? null;
@@ -270,12 +269,20 @@ export default function App() {
       setStatus("该表无主键，无法编辑");
       return;
     }
-    const pk: [string, CellValue][] = pkCols.map((name) => {
+    // pk 与 set 都提交「列名 + 列类型 + 原始输入串」，由后端 parse_value 按列类型
+    // 解析（design §4.6，#11/#69）；主键列同样按类型解析，不再走前端正则猜测。
+    const pk: EditCell[] = pkCols.map((name) => {
       const idx = cols.findIndex((c) => c.name === name);
-      return [name, row[idx]];
+      return [
+        name,
+        cols[idx].column_type ?? UNKNOWN_COLUMN_TYPE,
+        displayCell(row[idx]),
+      ];
     });
     const colName = cols[colIndex].name;
-    const set: [string, CellValue][] = [[colName, toCellValue(newValue)]];
+    const set: EditCell[] = [
+      [colName, cols[colIndex].column_type ?? UNKNOWN_COLUMN_TYPE, newValue],
+    ];
     try {
       const sql = await api.buildEditSql(activeId, table, pk, set);
       setPendingEdit({ sql, table, database: ws.selectedDb || null, pk, set });

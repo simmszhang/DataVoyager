@@ -1,6 +1,8 @@
 //! 数据编辑 SQL 生成（方言感知）：行内编辑生成 UPDATE/INSERT/DELETE。
 
 use crate::dialect::Dialect;
+use crate::error::{DbError, Result};
+use crate::metadata::{ColumnType, ColumnTypeBase};
 use crate::value::Value;
 
 /// 把 `Value` 格式化为 SQL 字面量（NULL / 数字 / 字符串转义 / bytes hex）。
@@ -41,7 +43,13 @@ pub fn build_update(
 ) -> String {
     let set_clause = set
         .iter()
-        .map(|(c, v)| format!("{} = {}", dialect.quote_identifier(c), quote_value(dialect, v)))
+        .map(|(c, v)| {
+            format!(
+                "{} = {}",
+                dialect.quote_identifier(c),
+                quote_value(dialect, v)
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let where_clause = build_where(dialect, pk);
@@ -89,15 +97,149 @@ pub fn build_delete(dialect: &dyn Dialect, table: &str, pk: &[(String, Value)]) 
 
 fn build_where(dialect: &dyn Dialect, pk: &[(String, Value)]) -> String {
     pk.iter()
-        .map(|(c, v)| format!("{} = {}", dialect.quote_identifier(c), quote_value(dialect, v)))
+        .map(|(c, v)| {
+            format!(
+                "{} = {}",
+                dialect.quote_identifier(c),
+                quote_value(dialect, v)
+            )
+        })
         .collect::<Vec<_>>()
         .join(" AND ")
+}
+
+/// 按列类型把编辑输入串解析为 `Value`（design §4.6，#11/#69）。
+///
+/// - Bool 仅认 `"true"/"1"` 与 `"false"/"0"`；
+/// - 整型/浮点按对应宽度解析；Decimal 保留原串；Bytes 取 UTF-8 字节；
+/// - Date/Time/DateTime 校验格式后产出类型化值（不再产出未校验的 Str）；
+/// - Json 走 `serde_json`；Str/Uuid/Array/Map/Unknown 原样收为 `Value::Str`。
+///
+/// 解析失败统一 `DbError::Other("无法将 '<input>' 解析为 <type>")`。
+pub fn parse_value(input: &str, ct: &ColumnType) -> Result<Value> {
+    let t = input.trim();
+    match &ct.base {
+        ColumnTypeBase::Bool => match t {
+            "true" | "1" => Ok(Value::Bool(true)),
+            "false" | "0" => Ok(Value::Bool(false)),
+            _ => Err(parse_err(t, ct.base)),
+        },
+        ColumnTypeBase::I8 | ColumnTypeBase::I16 | ColumnTypeBase::I32 | ColumnTypeBase::I64 => t
+            .parse::<i64>()
+            .map(Value::I64)
+            .map_err(|_| parse_err(t, ct.base)),
+        ColumnTypeBase::U8 | ColumnTypeBase::U16 | ColumnTypeBase::U32 | ColumnTypeBase::U64 => t
+            .parse::<u64>()
+            .map(Value::U64)
+            .map_err(|_| parse_err(t, ct.base)),
+        ColumnTypeBase::F32 | ColumnTypeBase::F64 => t
+            .parse::<f64>()
+            .map(Value::F64)
+            .map_err(|_| parse_err(t, ct.base)),
+        ColumnTypeBase::Decimal => Ok(Value::Decimal(t.to_string())),
+        ColumnTypeBase::Date => validate_date(t).map(Value::Date),
+        ColumnTypeBase::Time => validate_time(t).map(Value::Time),
+        ColumnTypeBase::DateTime => validate_datetime(t).map(Value::DateTime),
+        ColumnTypeBase::Json => serde_json::from_str(t)
+            .map(Value::Json)
+            .map_err(|_| parse_err(t, ct.base)),
+        ColumnTypeBase::Bytes => Ok(Value::Bytes(t.as_bytes().to_vec())),
+        ColumnTypeBase::Str
+        | ColumnTypeBase::Uuid
+        | ColumnTypeBase::Array
+        | ColumnTypeBase::Map
+        | ColumnTypeBase::Unknown => Ok(Value::Str(t.to_string())),
+    }
+}
+
+fn parse_err(input: &str, base: ColumnTypeBase) -> DbError {
+    DbError::Other(format!("无法将 '{input}' 解析为 {}", base_name(base)))
+}
+
+fn base_name(base: ColumnTypeBase) -> &'static str {
+    match base {
+        ColumnTypeBase::Bool => "bool",
+        ColumnTypeBase::I8 => "i8",
+        ColumnTypeBase::I16 => "i16",
+        ColumnTypeBase::I32 => "i32",
+        ColumnTypeBase::I64 => "i64",
+        ColumnTypeBase::U8 => "u8",
+        ColumnTypeBase::U16 => "u16",
+        ColumnTypeBase::U32 => "u32",
+        ColumnTypeBase::U64 => "u64",
+        ColumnTypeBase::F32 => "f32",
+        ColumnTypeBase::F64 => "f64",
+        ColumnTypeBase::Decimal => "decimal",
+        ColumnTypeBase::Str => "str",
+        ColumnTypeBase::Bytes => "bytes",
+        ColumnTypeBase::Date => "date",
+        ColumnTypeBase::Time => "time",
+        ColumnTypeBase::DateTime => "datetime",
+        ColumnTypeBase::Json => "json",
+        ColumnTypeBase::Uuid => "uuid",
+        ColumnTypeBase::Array => "array",
+        ColumnTypeBase::Map => "map",
+        ColumnTypeBase::Unknown => "unknown",
+    }
+}
+
+/// "YYYY-MM-DD"。
+fn validate_date(s: &str) -> Result<String> {
+    if is_date(s) {
+        Ok(s.to_string())
+    } else {
+        Err(parse_err(s, ColumnTypeBase::Date))
+    }
+}
+
+fn is_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[..4].iter().all(|c| c.is_ascii_digit())
+        && b[5..7].iter().all(|c| c.is_ascii_digit())
+        && b[8..10].iter().all(|c| c.is_ascii_digit())
+}
+
+/// "HH:MM:SS[.ffffff]"。
+fn validate_time(s: &str) -> Result<String> {
+    if is_time(s) {
+        Ok(s.to_string())
+    } else {
+        Err(parse_err(s, ColumnTypeBase::Time))
+    }
+}
+
+fn is_time(s: &str) -> bool {
+    let b = s.as_bytes();
+    let (hms, frac) = match b.iter().position(|&c| c == b'.') {
+        Some(i) => (&b[..i], Some(&b[i + 1..])),
+        None => (b, None),
+    };
+    hms.len() == 8
+        && hms[2] == b':'
+        && hms[5] == b':'
+        && hms[..2].iter().all(|c| c.is_ascii_digit())
+        && hms[3..5].iter().all(|c| c.is_ascii_digit())
+        && hms[6..8].iter().all(|c| c.is_ascii_digit())
+        && frac.is_none_or(|f| (1..=6).contains(&f.len()) && f.iter().all(|c| c.is_ascii_digit()))
+}
+
+/// "YYYY-MM-DD HH:MM:SS[.ffffff]"。
+fn validate_datetime(s: &str) -> Result<String> {
+    if let Some((date, time)) = s.split_once(' ') {
+        if is_date(date) && is_time(time) {
+            return Ok(s.to_string());
+        }
+    }
+    Err(parse_err(s, ColumnTypeBase::DateTime))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metadata::ColumnType;
+    use crate::metadata::{ColumnType, ColumnTypeBase};
 
     struct TestDialect;
     impl Dialect for TestDialect {
@@ -142,7 +284,10 @@ mod tests {
             &[("id".into(), Value::I64(1))],
             &[("name".into(), Value::Str("O'Brien".into()))],
         );
-        assert_eq!(sql, "UPDATE `users` SET `name` = 'O\\'Brien' WHERE `id` = 1;");
+        assert_eq!(
+            sql,
+            "UPDATE `users` SET `name` = 'O\\'Brien' WHERE `id` = 1;"
+        );
     }
 
     #[test]
@@ -154,9 +299,143 @@ mod tests {
             &["name".into(), "age".into()],
             &[Value::Str("x".into()), Value::I64(3)],
         );
-        assert_eq!(insert, "INSERT INTO `users` (`name`, `age`) VALUES ('x', 3);");
+        assert_eq!(
+            insert,
+            "INSERT INTO `users` (`name`, `age`) VALUES ('x', 3);"
+        );
 
         let delete = build_delete(&d, "users", &[("id".into(), Value::I64(9))]);
         assert_eq!(delete, "DELETE FROM `users` WHERE `id` = 9;");
+    }
+
+    #[test]
+    fn parse_value_by_column_type() {
+        let i64ct = ColumnType {
+            base: ColumnTypeBase::I64,
+            ..Default::default()
+        };
+        assert_eq!(parse_value("42", &i64ct).unwrap(), Value::I64(42));
+        assert!(parse_value("abc", &i64ct).is_err());
+        let decct = ColumnType {
+            base: ColumnTypeBase::Decimal,
+            ..Default::default()
+        };
+        assert_eq!(
+            parse_value("1.50", &decct).unwrap(),
+            Value::Decimal("1.50".into())
+        );
+        let date_ct = ColumnType {
+            base: ColumnTypeBase::Date,
+            ..Default::default()
+        };
+        assert_eq!(
+            parse_value("2024-01-02", &date_ct).unwrap(),
+            Value::Date("2024-01-02".into())
+        );
+        assert!(parse_value("garbage", &date_ct).is_err()); // 时间类校验格式，不产出未校验 Str
+        let jsonct = ColumnType {
+            base: ColumnTypeBase::Json,
+            ..Default::default()
+        };
+        assert_eq!(
+            parse_value("{\"a\":1}", &jsonct).unwrap(),
+            Value::Json(serde_json::json!({"a": 1}))
+        );
+    }
+
+    /// 其余 base 的解析 + 失败路径（design §4.6 / §6）：Bool/unsigned/F32/F64/
+    /// Time/DateTime/Bytes/Uuid/Unknown，以及错误消息统一为「无法将 '<input>' 解析为 <type>」。
+    #[test]
+    fn parse_value_covers_remaining_bases() {
+        let boolct = ColumnType {
+            base: ColumnTypeBase::Bool,
+            ..Default::default()
+        };
+        assert_eq!(parse_value("true", &boolct).unwrap(), Value::Bool(true));
+        assert_eq!(parse_value("1", &boolct).unwrap(), Value::Bool(true));
+        assert_eq!(parse_value("false", &boolct).unwrap(), Value::Bool(false));
+        assert_eq!(parse_value("0", &boolct).unwrap(), Value::Bool(false));
+        assert!(parse_value("2", &boolct).is_err());
+
+        let u64ct = ColumnType {
+            base: ColumnTypeBase::U64,
+            ..Default::default()
+        };
+        assert_eq!(parse_value("42", &u64ct).unwrap(), Value::U64(42));
+        assert!(parse_value("-1", &u64ct).is_err());
+
+        let f64ct = ColumnType {
+            base: ColumnTypeBase::F64,
+            ..Default::default()
+        };
+        assert_eq!(parse_value("1.5", &f64ct).unwrap(), Value::F64(1.5));
+        assert!(parse_value("x", &f64ct).is_err());
+
+        let time_ct = ColumnType {
+            base: ColumnTypeBase::Time,
+            ..Default::default()
+        };
+        assert_eq!(
+            parse_value("10:30:00", &time_ct).unwrap(),
+            Value::Time("10:30:00".into())
+        );
+        assert_eq!(
+            parse_value("10:30:00.500000", &time_ct).unwrap(),
+            Value::Time("10:30:00.500000".into())
+        );
+        assert!(parse_value("25:99", &time_ct).is_err());
+
+        let dt_ct = ColumnType {
+            base: ColumnTypeBase::DateTime,
+            ..Default::default()
+        };
+        assert_eq!(
+            parse_value("2024-01-02 03:04:05", &dt_ct).unwrap(),
+            Value::DateTime("2024-01-02 03:04:05".into())
+        );
+        assert_eq!(
+            parse_value("2024-01-02 03:04:05.123456", &dt_ct).unwrap(),
+            Value::DateTime("2024-01-02 03:04:05.123456".into())
+        );
+        assert!(parse_value("2024-01-02", &dt_ct).is_err());
+        assert!(parse_value("garbage", &dt_ct).is_err());
+
+        let bytes_ct = ColumnType {
+            base: ColumnTypeBase::Bytes,
+            ..Default::default()
+        };
+        assert_eq!(
+            parse_value("hi", &bytes_ct).unwrap(),
+            Value::Bytes(b"hi".to_vec())
+        );
+
+        let str_ct = ColumnType {
+            base: ColumnTypeBase::Str,
+            ..Default::default()
+        };
+        assert_eq!(parse_value("x", &str_ct).unwrap(), Value::Str("x".into()));
+
+        let uuid_ct = ColumnType {
+            base: ColumnTypeBase::Uuid,
+            ..Default::default()
+        };
+        assert_eq!(
+            parse_value("u1", &uuid_ct).unwrap(),
+            Value::Str("u1".into())
+        );
+
+        let unknown_ct = ColumnType::unknown();
+        assert_eq!(
+            parse_value("abc", &unknown_ct).unwrap(),
+            Value::Str("abc".into())
+        );
+
+        // 错误消息统一为「无法将 '<input>' 解析为 <type>」
+        let i64ct = ColumnType {
+            base: ColumnTypeBase::I64,
+            ..Default::default()
+        };
+        let err = parse_value("abc", &i64ct).unwrap_err();
+        assert_eq!(err.to_string(), "无法将 'abc' 解析为 i64");
     }
 }

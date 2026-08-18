@@ -9,6 +9,18 @@ fn ssh_err(e: russh::Error) -> DbError {
     DbError::Other(e.to_string())
 }
 
+/// 把 `Error::UnknownKey`（主机指纹未知或不匹配）映射为面向用户的 `Config` 错误：
+/// `expected` 为空（未知主机）提示先确认指纹；否则提示不匹配（可能中间人攻击）并给出期望与实际指纹。
+fn map_unknown_key_error(expected: Option<&str>, observed: Option<String>) -> DbError {
+    match expected {
+        None => DbError::Config("需先确认 SSH 主机指纹".to_string()),
+        Some(exp) => DbError::Config(format!(
+            "SSH 主机指纹不匹配（可能中间人攻击）：期望 {exp}，实际 {}",
+            observed.unwrap_or_default()
+        )),
+    }
+}
+
 /// SSH kex（`connect`）阶段超时阈值：设计定死恰好 10 秒。
 ///
 /// `russh::client::Config` 无 `connection_timeout` 字段，超时只能靠
@@ -123,18 +135,30 @@ pub async fn start_tunnel(
     target_port: u16,
 ) -> Result<SshTunnel> {
     let config = Arc::new(russh::client::Config::default());
+    let observed = Arc::new(Mutex::new(None));
     let handler = ClientHandler {
         expected: ssh.host_key_fingerprint.clone(),
-        observed: Arc::new(Mutex::new(None)),
+        observed: observed.clone(),
     };
     // 仅包裹 kex（connect）阶段；认证（authenticate_*）阶段超时归后续项（design §4.6 注）。
-    let mut handle = tokio::time::timeout(
+    let connect_result = tokio::time::timeout(
         ssh_connect_timeout(),
         russh::client::connect(config, (ssh.host.clone(), ssh.port), handler),
     )
-    .await
-    .map_err(|_| DbError::Other("SSH 连接超时".to_string()))?
-    .map_err(ssh_err)?;
+    .await;
+    let mut handle = match connect_result {
+        Err(_) => return Err(DbError::Other("SSH 连接超时".to_string())),
+        Ok(Err(russh::Error::UnknownKey)) => {
+            // handler 已把实际指纹写入 observed 槽；按 expected 区分「未知主机」与「指纹不匹配」
+            let actual = observed.lock().unwrap().take();
+            return Err(map_unknown_key_error(
+                ssh.host_key_fingerprint.as_deref(),
+                actual,
+            ));
+        }
+        Ok(Err(e)) => return Err(ssh_err(e)),
+        Ok(Ok(h)) => h,
+    };
     let auth = match pick_auth(ssh) {
         AuthKind::PublicKey => {
             // PEM 字符串（非文件路径）；加密私钥 passphrase 暂不支持（无 passphrase 入参）
@@ -323,5 +347,33 @@ mod tests {
             super::ssh_connect_timeout(),
             std::time::Duration::from_secs(10)
         );
+    }
+
+    /// `map_unknown_key_error`：expected=None（未知主机）→「需先确认」提示；
+    /// expected=Some(X) 且 observed=Some(Y)（指纹不匹配）→ 错误信息同时包含期望与实际指纹。
+    #[test]
+    fn maps_unknown_key_error_by_expected() {
+        // 未知主机（expected=None）→ 需先确认 SSH 主机指纹
+        let err = map_unknown_key_error(None, Some("SHA256:actual".to_string()));
+        match err {
+            DbError::Config(msg) => assert_eq!(msg, "需先确认 SSH 主机指纹"),
+            other => panic!("expected DbError::Config, got {other:?}"),
+        }
+
+        // 指纹不匹配（expected=Some(X)，observed=Some(Y)）→ 信息同时包含 X 与 Y
+        let err = map_unknown_key_error(Some("SHA256:expected"), Some("SHA256:actual".to_string()));
+        match err {
+            DbError::Config(msg) => {
+                assert!(
+                    msg.contains("SHA256:expected"),
+                    "message must contain the expected fingerprint: {msg}"
+                );
+                assert!(
+                    msg.contains("SHA256:actual"),
+                    "message must contain the actual fingerprint: {msg}"
+                );
+            }
+            other => panic!("expected DbError::Config, got {other:?}"),
+        }
     }
 }

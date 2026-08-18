@@ -17,7 +17,7 @@
 | 引擎 | `dby-core`（纯 Rust，无 GUI 依赖，可独立 `cargo test`） |
 | 前端 | React 19 + TypeScript + Vite |
 | SQL 编辑器 | CodeMirror 6 |
-| MySQL 驱动 | [mysql](https://crates.io/crates/mysql) 28（纯 Rust flate2） |
+| MySQL 驱动 | [mysql_async](https://crates.io/crates/mysql_async) 0.37（纯 Rust flate2，异步/流式/可取消） |
 | 历史存储 | SQLite（`rusqlite` bundled + FTS5） |
 
 ## 功能

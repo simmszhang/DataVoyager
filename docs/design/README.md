@@ -6,12 +6,13 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [architecture.md](./architecture.md) | 分层架构、核心抽象（Value/Driver/Dialect）、持久化、IPC 数据流 |
+| [architecture.md](./architecture.md) | 分层架构、核心抽象、持久化、IPC 数据流、类型映射/错误模型/并发/安全（评审新增 §8–13） |
 | [subsystems.md](./subsystems.md) | M0/M1 各子系统的目标、方案、边界与取舍 |
-| [defects.md](./defects.md) | 已知设计缺陷清单（严重度 + 现状 + 建议修复方向） |
+| [defects.md](./defects.md) | 缺陷清单；首批 #1–#20 + 评审新增 #21–#69 |
+| [review.md](./review.md) | 逐层代码审查证据（文档↔代码差异 + 新缺口，含 file:line） |
 
 ## 状态
 
-- 代码已实现（M0 + M1 全部功能），**未经设计评审**。
-- 本目录是回溯补写的设计记录，其中 `defects.md` 逐项标出当前实现与理想设计的差距。
+- 代码已实现（M0 + M1 全部功能），**已完成首轮逐层代码评审**（见 `review.md`），**尚未进入「定方案 → 修复」阶段**。
+- `defects.md` 现列 69 项缺陷（首批 20 + 评审新增 49）。
 - 待评审确认后，按缺陷清单统一修复。

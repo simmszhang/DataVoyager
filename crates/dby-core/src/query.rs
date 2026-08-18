@@ -100,19 +100,46 @@ pub trait ResultSink: Send {
     fn on_event(&mut self, ev: StreamEvent);
 }
 
-/// 极简取消令牌（避免 tokio-util 依赖）。
-#[derive(Debug, Clone, Default)]
-pub struct CancellationToken(Arc<AtomicBool>);
+/// 取消令牌：`AtomicBool` 快速无锁轮询 + `watch` 通道（`cancelled()` 无丢失唤醒）。
+#[derive(Debug, Clone)]
+pub struct CancellationToken {
+    flag: Arc<AtomicBool>, // 快速无锁轮询（批内检查）
+    tx: tokio::sync::watch::Sender<bool>,
+    rx: tokio::sync::watch::Receiver<bool>,
+}
 
 impl CancellationToken {
     pub fn new() -> Self {
-        Self(Arc::new(AtomicBool::new(false)))
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        Self {
+            flag: Arc::new(AtomicBool::new(false)),
+            tx,
+            rx,
+        }
     }
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        self.flag.store(true, Ordering::SeqCst);
+        let _ = self.tx.send(true); // watch 存最新值：后订阅者立即可见，无 Notify 丢失唤醒
     }
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.flag.load(Ordering::SeqCst)
+    }
+    /// 等待取消：先 cancel 后首 poll 也会立即返回（watch 存最新值，语义正确）。
+    pub async fn cancelled(&self) {
+        if self.is_cancelled() {
+            return;
+        }
+        let mut rx = self.rx.clone();
+        if *rx.borrow() {
+            return;
+        }
+        let _ = rx.changed().await;
+    }
+}
+
+impl Default for CancellationToken {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -185,6 +212,8 @@ impl ResultSink for CollectingSink {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[test]
@@ -193,6 +222,29 @@ mod tests {
         assert!(!t.is_cancelled());
         t.cancel();
         assert!(t.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn cancelled_resolves_when_cancel_before_or_after_poll() {
+        // 场景 A：先 cancel 再 poll cancelled() → 立即返回
+        let t = CancellationToken::new();
+        t.cancel();
+        tokio::time::timeout(Duration::from_secs(1), t.cancelled())
+            .await
+            .unwrap();
+        // 场景 B：poll 中 cancel → notified
+        let t2 = CancellationToken::new();
+        let fut = t2.cancelled();
+        tokio::pin!(fut);
+        tokio::select! {
+            _ = &mut fut => panic!("不应提前返回"),
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+        }
+        t2.cancel();
+        tokio::time::timeout(Duration::from_secs(1), fut)
+            .await
+            .unwrap();
+        assert!(t2.is_cancelled());
     }
 
     #[test]

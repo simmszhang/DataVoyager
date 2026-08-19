@@ -426,7 +426,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="app">
+    <div className="app" onContextMenu={(e) => e.preventDefault()}>
       <header className="topbar">
         <div className="brand">dby</div>
         <div className="conn-info">

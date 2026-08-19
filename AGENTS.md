@@ -95,7 +95,7 @@ DBY_TEST_MYSQL_PORT=33061 DBY_TEST_MYSQL_PASSWORD=dby-test \
 - 优先级：`P0` 阻塞/安全紧急 > `P1` 高 > `P2` 中 > `P3` 低。
 - 缺陷清单里每条必须带 `P级 + 规模` 标签，评审与排期以此为准。
 
-**缺陷清单是唯一 backlog**：`docs/design/defects.md` 是当前待评审 + 待修复的权威清单，不另起炉灶。
+**backlog 是唯一权威**：`docs/design/defects.md`（缺陷）+ `docs/design/requirements.md`（需求/变更）共同构成唯一 backlog，不另起炉灶。每个新需求/修改点/缺陷**先登记（带 P级 + 规模）再执行**，执行产物回链到登记条目。
 
 ## 当前状态
 
@@ -107,7 +107,7 @@ DBY_TEST_MYSQL_PORT=33061 DBY_TEST_MYSQL_PASSWORD=dby-test \
 
 ## 新会话启动检查清单
 
-1. 读 `docs/design/README.md` → `defects.md`，确认当前评审/修复进度。
+1. 读 `docs/design/README.md` → `requirements.md` → `defects.md`，确认当前需求登记/评审/修复进度。
 2. 若有"已评审、待修复"的方案，按方案执行修复 + 测试。
 3. 若有新需求：先需求分析、判断规模（大/中/小），再按铁律执行（小直接改，中/大先设计评审再实现）。
 4. 更新 `docs/design/defects.md`（修复完成则勾掉/降级），并同步本文件的"当前状态"。
@@ -116,6 +116,7 @@ DBY_TEST_MYSQL_PORT=33061 DBY_TEST_MYSQL_PASSWORD=dby-test \
 
 - `docs/design/architecture.md` — 总体架构与核心抽象
 - `docs/design/subsystems.md` — 各子系统设计
+- `docs/design/requirements.md` — 需求/变更登记（唯一 backlog · 需求侧）
 - `docs/design/defects.md` — 缺陷清单（评审核心）
 - `docs/design/review.md` — 逐层代码审查证据（file:line）
 - `deploy/database/README.md` — 本地 MySQL 集成测试配方

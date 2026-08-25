@@ -106,6 +106,18 @@ export default function SchemaTree({
       .catch((e) => setStatus(errToString(e)));
   }
 
+  function handleTruncateTable(n: { connId: number; database: string; name: string }) {
+    if (!window.confirm(t("tree.truncateConfirm", { name: n.name }))) return;
+    api
+      .truncateTable(n.connId, n.database, n.name, true)
+      .then(() => setStatus(t("tree.truncateSuccess")))
+      .catch((e) => setStatus(errToString(e)));
+  }
+
+  function copyToClipboard(text: string) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  }
+
   const nodes: ReactElement[] = [];
   for (const c of connections) {
     const ck = connKey(c.id);
@@ -204,7 +216,9 @@ export default function SchemaTree({
         label: t("tree.menu.queryData"),
         action: () => onOpenTable(node.connId, node.database, node.name),
       });
+      menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
       menuItems.push({ label: t("tree.menu.rename"), action: () => handleRenameTable(node) });
+      menuItems.push({ label: t("tree.menu.truncateTable"), action: () => handleTruncateTable(node) });
       menuItems.push({ label: t("tree.menu.dropTable"), action: () => handleDropTable(node) });
     }
   }

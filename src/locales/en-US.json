@@ -106,13 +106,26 @@
     "renamePrompt": "New table name",
     "dropDatabaseConfirm": "Delete database \"{{name}}\"? This cannot be undone.",
     "dropTableConfirm": "Delete table \"{{name}}\"? This cannot be undone.",
+    "dropViewConfirm": "Delete view \"{{name}}\"? This cannot be undone.",
+    "dropRoutineConfirm": "Delete \"{{name}}\"? This cannot be undone.",
+    "dropTriggerConfirm": "Delete trigger \"{{name}}\"? This cannot be undone.",
+    "truncateConfirm": "Truncate all data in table \"{{name}}\"? This cannot be undone!",
+    "truncateSuccess": "Table truncated successfully",
     "menu": {
       "disconnect": "Disconnect",
       "createTable": "New Table",
       "dropDatabase": "Drop Database",
       "queryData": "Query Data",
       "rename": "Rename",
-      "dropTable": "Drop Table"
+      "dropTable": "Drop Table",
+      "refresh": "Refresh",
+      "copyName": "Copy Name",
+      "truncateTable": "Truncate Table",
+      "dropView": "Drop View",
+      "dropRoutine": "Drop",
+      "dropTrigger": "Drop Trigger",
+      "copyColumnName": "Copy Column Name",
+      "copyColumnDef": "Copy Column Definition"
     }
   },
   "editor": {

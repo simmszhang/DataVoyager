@@ -106,13 +106,26 @@
     "renamePrompt": "新表名",
     "dropDatabaseConfirm": "确定删除数据库「{{name}}」？此操作不可撤销。",
     "dropTableConfirm": "确定删除表「{{name}}」？此操作不可撤销。",
+    "dropViewConfirm": "确定删除视图「{{name}}」？此操作不可撤销。",
+    "dropRoutineConfirm": "确定删除「{{name}}」？此操作不可撤销。",
+    "dropTriggerConfirm": "确定删除触发器「{{name}}」？此操作不可撤销。",
+    "truncateConfirm": "确定清空表「{{name}}」的所有数据？此操作不可撤销！",
+    "truncateSuccess": "表已清空",
     "menu": {
       "disconnect": "断开连接",
       "createTable": "新建表",
       "dropDatabase": "删除数据库",
       "queryData": "查询数据",
       "rename": "重命名",
-      "dropTable": "删除表"
+      "dropTable": "删除表",
+      "refresh": "刷新",
+      "copyName": "复制名称",
+      "truncateTable": "清空表",
+      "dropView": "删除视图",
+      "dropRoutine": "删除",
+      "dropTrigger": "删除触发器",
+      "copyColumnName": "复制列名",
+      "copyColumnDef": "复制列定义"
     }
   },
   "editor": {

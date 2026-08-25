@@ -1059,11 +1059,11 @@ pub async fn build_insert_sql(
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let driver_id = entry.lock().await.driver_id.clone();
     let driver = state.registry.resolve(&driver_id)?;
-    
+
     let parsed = parse_cells(&cells)?;
     let columns: Vec<String> = parsed.iter().map(|(n, _)| n.clone()).collect();
     let values: Vec<dby_core::value::Value> = parsed.into_iter().map(|(_, v)| v).collect();
-    
+
     Ok(dby_core::edit::build_insert(
         driver.dialect(),
         &table,

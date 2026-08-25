@@ -1242,6 +1242,63 @@ pub async fn drop_table(
     run_ddl(state.inner(), id, Some(database), sql).await
 }
 
+#[tauri::command]
+pub async fn drop_view(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    name: String,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_drop_view(driver.dialect(), &name);
+    guard_dangerous(&sql, confirmed)?;
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
+pub async fn drop_routine(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    kind: String,
+    name: String,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_drop_routine(driver.dialect(), &kind, &name);
+    guard_dangerous(&sql, confirmed)?;
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
+pub async fn drop_trigger(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    name: String,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_drop_trigger(driver.dialect(), &name);
+    guard_dangerous(&sql, confirmed)?;
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
+pub async fn truncate_table(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    name: String,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_truncate_table(driver.dialect(), &name);
+    guard_dangerous(&sql, confirmed)?;
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
 // ---------- 导出 ----------
 
 #[tauri::command]

@@ -364,6 +364,14 @@ export const api = {
   ) => invoke<QueryOutput>("rename_table", { id, database, oldName, newName, confirmed }),
   dropTable: (id: number, database: string, name: string, confirmed: boolean) =>
     invoke<QueryOutput>("drop_table", { id, database, name, confirmed }),
+  dropView: (id: number, database: string, name: string, confirmed: boolean) =>
+    invoke<QueryOutput>("drop_view", { id, database, name, confirmed }),
+  dropRoutine: (id: number, database: string, kind: string, name: string, confirmed: boolean) =>
+    invoke<QueryOutput>("drop_routine", { id, database, kind, name, confirmed }),
+  dropTrigger: (id: number, database: string, name: string, confirmed: boolean) =>
+    invoke<QueryOutput>("drop_trigger", { id, database, name, confirmed }),
+  truncateTable: (id: number, database: string, name: string, confirmed: boolean) =>
+    invoke<QueryOutput>("truncate_table", { id, database, name, confirmed }),
 
   listProjects: () => invoke<Project[]>("list_projects"),
   createProject: (name: string) => invoke<Project>("create_project", { name }),

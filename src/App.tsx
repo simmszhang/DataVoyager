@@ -581,7 +581,12 @@ export default function App() {
                 {ws.error ? (
                   <div className="error-box">{ws.error}</div>
                 ) : ws.result ? (
-                  <ResultsGrid result={ws.result} onEditCell={handleEditCell} />
+                  <ResultsGrid
+                    result={ws.result}
+                    onEditCell={handleEditCell}
+                    tableName={ws.selectedTable}
+                    connId={activeId}
+                  />
                 ) : (
                   <div className="empty-state">{t("app.empty.selectTableOrRun")}</div>
                 )}

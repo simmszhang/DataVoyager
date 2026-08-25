@@ -156,7 +156,13 @@
     "truncatedSuffix": "（结果已截断）",
     "truncated": "· 结果已截断",
     "truncatedTitle": "结果集超出单组行数上限，仅展示已接收的部分行",
-    "doubleClickEdit": " · 双击单元格编辑"
+    "doubleClickEdit": " · 双击单元格编辑",
+    "menu": {
+      "copyCell": "复制单元格",
+      "copyRowAsJson": "复制行（JSON）",
+      "copyAsInsert": "复制为 INSERT 语句",
+      "setNull": "设为 NULL"
+    }
   },
   "export": {
     "dialog": {

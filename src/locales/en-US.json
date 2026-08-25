@@ -156,7 +156,13 @@
     "truncatedSuffix": " (result truncated)",
     "truncated": "· truncated",
     "truncatedTitle": "Result set exceeds the per-batch row limit; only received rows are shown",
-    "doubleClickEdit": " · double-click a cell to edit"
+    "doubleClickEdit": " · double-click a cell to edit",
+    "menu": {
+      "copyCell": "Copy Cell",
+      "copyRowAsJson": "Copy Row as JSON",
+      "copyAsInsert": "Copy as INSERT Statement",
+      "setNull": "Set to NULL"
+    }
   },
   "export": {
     "dialog": {

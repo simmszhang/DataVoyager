@@ -2,9 +2,11 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  api,
   CellValue,
   ColumnInfo,
   ColumnTypeBase,
+  EditCell,
   StreamResult,
   displayCell,
 } from "../api";
@@ -16,6 +18,8 @@ const ROWNUM_WIDTH = 56;
 interface Props {
   result: StreamResult;
   onEditCell?: (rowIndex: number, colIndex: number, newValue: string) => void;
+  tableName?: string | null;
+  connId?: number | null;
 }
 
 function Cell({ value }: { value: CellValue }) {
@@ -47,6 +51,8 @@ const NUMERIC_BASES: ReadonlySet<ColumnTypeBase> = new Set([
   "f64",
   "decimal",
 ]);
+
+const UNKNOWN_COLUMN_TYPE = { base: "unknown" as ColumnTypeBase };
 
 type EditorKind = "number" | "bool" | "json" | "text";
 
@@ -122,10 +128,11 @@ function CellEditor({ kind, text, onChange, onCommit, onCancel }: CellEditorProp
   );
 }
 
-export default function ResultsGrid({ result, onEditCell }: Props) {
+export default function ResultsGrid({ result, onEditCell, tableName, connId }: Props) {
   const { t } = useTranslation();
   const parentRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{ row: number; col: number; text: string } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; row: number; col: number } | null>(null);
   const rows = result.columns ? result.rows : [];
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -222,6 +229,11 @@ export default function ResultsGrid({ result, onEditCell }: Props) {
                             text: cell.t === "null" ? "" : displayCell(cell),
                           })
                         }
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setMenu({ x: e.clientX, y: e.clientY, row: vi.index, col: j });
+                        }}
                       >
                         {isEditing ? (
                           <CellEditor
@@ -243,6 +255,82 @@ export default function ResultsGrid({ result, onEditCell }: Props) {
           </div>
         </div>
       </div>
+
+      {menu && result.columns && (
+        (() => {
+          const row = result.rows[menu.row];
+          const cell = row[menu.col];
+          const columns = result.columns;
+          
+          const menuItems: { label: string; action: () => void }[] = [];
+          
+          // 复制单元格值
+          menuItems.push({
+            label: t("grid.menu.copyCell"),
+            action: () => {
+              navigator.clipboard.writeText(displayCell(cell));
+              setMenu(null);
+            },
+          });
+          
+          // 复制整行为 JSON
+          menuItems.push({
+            label: t("grid.menu.copyRowAsJson"),
+            action: () => {
+              const rowObj = Object.fromEntries(
+                columns.map((c, i) => [c.name, displayCell(row[i])])
+              );
+              navigator.clipboard.writeText(JSON.stringify(rowObj, null, 2));
+              setMenu(null);
+            },
+          });
+          
+          // 复制为 INSERT 语句（需要表名和连接 id）
+          if (tableName && connId) {
+            menuItems.push({
+              label: t("grid.menu.copyAsInsert"),
+              action: async () => {
+                try {
+                  const cells: EditCell[] = columns.map((c, i) => [
+                    c.name,
+                    c.column_type ?? UNKNOWN_COLUMN_TYPE,
+                    displayCell(row[i]),
+                  ]);
+                  const sql = await api.buildInsertSql(connId, tableName, cells);
+                  navigator.clipboard.writeText(sql);
+                } catch {
+                  // 失败静默
+                }
+                setMenu(null);
+              },
+            });
+          }
+          
+          // 设为 NULL（仅当可编辑时显示）
+          if (onEditCell) {
+            menuItems.push({
+              label: t("grid.menu.setNull"),
+              action: () => {
+                onEditCell(menu.row, menu.col, "NULL");
+                setMenu(null);
+              },
+            });
+          }
+          
+          return (
+            <>
+              <div className="ctx-overlay" onClick={() => setMenu(null)} />
+              <div className="ctx-menu" style={{ left: menu.x, top: menu.y }}>
+                {menuItems.map((m, i) => (
+                  <div key={i} className="ctx-item" onClick={() => m.action()}>
+                    {m.label}
+                  </div>
+                ))}
+              </div>
+            </>
+          );
+        })()
+      )}
     </div>
   );
 }

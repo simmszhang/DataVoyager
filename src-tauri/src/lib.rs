@@ -61,6 +61,7 @@ pub fn run() {
             commands::set_autocommit,
             commands::export_result,
             commands::build_edit_sql,
+            commands::build_insert_sql,
             commands::execute_edit,
             commands::create_database,
             commands::drop_database,

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -10,16 +10,21 @@ import {
   StreamResult,
   displayCell,
 } from "../api";
+import { errToString } from "../i18n";
+import GridToolbar from "./GridToolbar";
 
 const ROW_HEIGHT = 30;
 const COL_WIDTH = 200;
 const ROWNUM_WIDTH = 56;
+const CHECKBOX_WIDTH = 40;
 
 interface Props {
   result: StreamResult;
   onEditCell?: (rowIndex: number, colIndex: number, newValue: string) => void;
   tableName?: string | null;
   connId?: number | null;
+  database?: string | null;
+  onRefresh?: () => void;
 }
 
 function Cell({ value }: { value: CellValue }) {
@@ -128,14 +133,39 @@ function CellEditor({ kind, text, onChange, onCommit, onCancel }: CellEditorProp
   );
 }
 
-export default function ResultsGrid({ result, onEditCell, tableName, connId }: Props) {
+export default function ResultsGrid({
+  result,
+  onEditCell,
+  tableName,
+  connId,
+  database,
+  onRefresh,
+}: Props) {
   const { t } = useTranslation();
   const parentRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{ row: number; col: number; text: string } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; row: number; col: number } | null>(null);
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [pendingInserts, setPendingInserts] = useState<Map<number, CellValue[]>>(new Map());
+  const [primaryKey, setPrimaryKey] = useState<string[]>([]);
+
   const rows = result.columns ? result.rows : [];
+  const totalRows = rows.length + pendingInserts.size;
+
+  // 获取主键
+  useEffect(() => {
+    if (connId && database && tableName) {
+      api
+        .getPrimaryKey(connId, database, tableName)
+        .then(setPrimaryKey)
+        .catch(() => setPrimaryKey([]));
+    } else {
+      setPrimaryKey([]);
+    }
+  }, [connId, database, tableName]);
+
   const virtualizer = useVirtualizer({
-    count: rows.length,
+    count: totalRows,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 12,
@@ -144,6 +174,66 @@ export default function ResultsGrid({ result, onEditCell, tableName, connId }: P
   function commitEdit() {
     if (editing && onEditCell) onEditCell(editing.row, editing.col, editing.text);
     setEditing(null);
+  }
+
+  function handleAdd() {
+    if (!result.columns) return;
+    const newRow = result.columns.map(() => ({ t: "null" } as CellValue));
+    const newIndex = totalRows;
+    setPendingInserts(new Map(pendingInserts).set(newIndex, newRow));
+  }
+
+  async function handleDelete() {
+    if (!connId || !database || !tableName || primaryKey.length === 0) return;
+
+    const count = selectedRows.size;
+    if (!window.confirm(t("grid.deleteConfirm", { count }))) return;
+
+    const pkColumn = primaryKey[0]; // 简化：仅支持单列主键
+    const pkColIdx = result.columns?.findIndex((c) => c.name === pkColumn) ?? -1;
+    if (pkColIdx < 0) return;
+
+    const pkValues: string[] = [];
+    selectedRows.forEach((rowIdx) => {
+      if (rowIdx < rows.length) {
+        const row = rows[rowIdx];
+        pkValues.push(displayCell(row[pkColIdx]));
+      }
+    });
+
+    try {
+      await api.batchDeleteRows(connId, database, tableName, pkColumn, pkValues, true);
+      setSelectedRows(new Set());
+      onRefresh?.();
+    } catch (e) {
+      alert(errToString(e));
+    }
+  }
+
+  async function handleSave() {
+    if (!connId || !database || !tableName || pendingInserts.size === 0) return;
+
+    const insertRows: EditCell[][] = Array.from(pendingInserts.values()).map((row) =>
+      result.columns!.map((col, i) => [
+        col.name,
+        col.column_type ?? UNKNOWN_COLUMN_TYPE,
+        displayCell(row[i]),
+      ])
+    );
+
+    try {
+      await api.batchInsertRows(connId, database, tableName, insertRows);
+      setPendingInserts(new Map());
+      onRefresh?.();
+    } catch (e) {
+      alert(errToString(e));
+    }
+  }
+
+  function handleRefresh() {
+    setPendingInserts(new Map());
+    setSelectedRows(new Set());
+    onRefresh?.();
   }
 
   if (!result.columns) {
@@ -158,12 +248,25 @@ export default function ResultsGrid({ result, onEditCell, tableName, connId }: P
   }
 
   const { columns } = result;
-  const colTemplate = `${ROWNUM_WIDTH}px ${columns
+  const colTemplate = `${CHECKBOX_WIDTH}px ${ROWNUM_WIDTH}px ${columns
     .map(() => `${COL_WIDTH}px`)
     .join(" ")}`;
 
+  const canDelete = primaryKey.length > 0 && connId != null && database != null && tableName != null;
+
   return (
     <div className="results">
+      {canDelete && (
+        <GridToolbar
+          selectedCount={selectedRows.size}
+          totalRows={totalRows}
+          canDelete={canDelete}
+          onAdd={handleAdd}
+          onDelete={handleDelete}
+          onSave={handleSave}
+          onRefresh={handleRefresh}
+        />
+      )}
       <div className="result-meta">
         {t("grid.rowsReturned", { count: rows.length })}
         {result.truncated && (
@@ -182,6 +285,21 @@ export default function ResultsGrid({ result, onEditCell, tableName, connId }: P
             className="grid-header"
             style={{ display: "grid", gridTemplateColumns: colTemplate }}
           >
+            {canDelete && (
+              <div className="grid-cell header-cell">
+                <input
+                  type="checkbox"
+                  checked={rows.length > 0 && selectedRows.size === rows.length}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedRows(new Set(rows.map((_, i) => i)));
+                    } else {
+                      setSelectedRows(new Set());
+                    }
+                  }}
+                />
+              </div>
+            )}
             <div className="grid-cell rownum">#</div>
             {columns.map((c) => (
               <div className="grid-cell" key={c.name} title={c.type_name}>
@@ -198,7 +316,10 @@ export default function ResultsGrid({ result, onEditCell, tableName, connId }: P
             }}
           >
             {virtualizer.getVirtualItems().map((vi) => {
-              const row = rows[vi.index];
+              const isPendingInsert = vi.index >= rows.length;
+              const row = isPendingInsert
+                ? pendingInserts.get(vi.index) ?? []
+                : rows[vi.index];
               return (
                 <div
                   key={vi.key}
@@ -214,6 +335,24 @@ export default function ResultsGrid({ result, onEditCell, tableName, connId }: P
                     gridTemplateColumns: colTemplate,
                   }}
                 >
+                  {canDelete && (
+                    <div className="grid-cell">
+                      <input
+                        type="checkbox"
+                        checked={selectedRows.has(vi.index)}
+                        onChange={(e) => {
+                          const newSelected = new Set(selectedRows);
+                          if (e.target.checked) {
+                            newSelected.add(vi.index);
+                          } else {
+                            newSelected.delete(vi.index);
+                          }
+                          setSelectedRows(newSelected);
+                        }}
+                        disabled={isPendingInsert}
+                      />
+                    </div>
+                  )}
                   <div className="grid-cell rownum">{vi.index + 1}</div>
                   {row.map((cell, j) => {
                     const isEditing = editing?.row === vi.index && editing?.col === j;

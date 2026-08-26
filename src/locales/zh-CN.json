@@ -159,11 +159,20 @@
     "truncated": "· 结果已截断",
     "truncatedTitle": "结果集超出单组行数上限，仅展示已接收的部分行",
     "doubleClickEdit": " · 双击单元格编辑",
+    "deleteConfirm": "确定删除选中的 {{count}} 行？此操作不可撤销。",
     "menu": {
       "copyCell": "复制单元格",
       "copyRowAsJson": "复制行（JSON）",
       "copyAsInsert": "复制为 INSERT 语句",
       "setNull": "设为 NULL"
+    },
+    "toolbar": {
+      "add": "新增",
+      "delete": "删除",
+      "save": "保存",
+      "refresh": "刷新",
+      "selected": "已选 {{count}} 行",
+      "totalRows": "共 {{count}} 行"
     }
   },
   "export": {

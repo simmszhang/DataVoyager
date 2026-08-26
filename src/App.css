@@ -976,3 +976,39 @@ body {
   padding: 14px 18px;
   border-top: 1px solid var(--border);
 }
+
+/* Grid Toolbar */
+.grid-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--sidebar-bg);
+}
+
+.btn-icon {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.btn-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toolbar-info {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-dim);
+}

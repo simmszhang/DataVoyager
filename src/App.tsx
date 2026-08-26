@@ -597,6 +597,12 @@ export default function App() {
                     onEditCell={handleEditCell}
                     tableName={ws.selectedTable}
                     connId={activeId}
+                    database={ws.selectedDb}
+                    onRefresh={() => {
+                      if (activeId && ws.selectedTable && ws.query) {
+                        runQuery(activeId, ws.query);
+                      }
+                    }}
                   />
                 ) : (
                   <div className="empty-state">{t("app.empty.selectTableOrRun")}</div>

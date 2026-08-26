@@ -146,6 +146,16 @@ export default function App() {
     }
   }
 
+  async function handleShowDDL(connId: number, database: string, table: string) {
+    try {
+      const ddl = await api.showCreateTable(connId, database, table);
+      updateWorkspace(connId, { query: ddl });
+      setStatus(t("app.status.ddlLoaded"));
+    } catch (e) {
+      setStatus(errToString(e));
+    }
+  }
+
   async function runQuery(id: number, sql: string, confirmed: boolean = false) {
     const db = workspaces[id]?.selectedDb ?? "";
     updateWorkspace(id, {
@@ -528,6 +538,7 @@ export default function App() {
             onSelectConnection={handleSelectConnection}
             onDisconnect={handleDisconnect}
             onOpenTable={handleOpenTable}
+            onShowDDL={handleShowDDL}
           />
 
           <div className="sidebar-head">

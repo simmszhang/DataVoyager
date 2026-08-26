@@ -8,6 +8,7 @@
     "status": {
       "connected": "Connected {{name}} ({{version}})",
       "tableSqlFailed": "Failed to generate table browse SQL",
+      "ddlLoaded": "DDL loaded to editor",
       "rowsReturned": "{{count}} rows returned",
       "rowsAffected": "{{count}} rows affected",
       "cancelledAutoReconnect": "Cancelled; the connection will auto-reconnect",
@@ -116,6 +117,7 @@
       "createTable": "New Table",
       "dropDatabase": "Drop Database",
       "queryData": "Query Data",
+      "showDDL": "Show DDL",
       "rename": "Rename",
       "dropTable": "Drop Table",
       "refresh": "Refresh",

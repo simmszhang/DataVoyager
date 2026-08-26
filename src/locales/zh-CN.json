@@ -8,6 +8,7 @@
     "status": {
       "connected": "已连接 {{name}}（{{version}}）",
       "tableSqlFailed": "生成表浏览 SQL 失败",
+      "ddlLoaded": "DDL 已加载到编辑器",
       "rowsReturned": "返回 {{count}} 行",
       "rowsAffected": "影响 {{count}} 行",
       "cancelledAutoReconnect": "已取消，连接将自动重连",
@@ -116,6 +117,7 @@
       "createTable": "新建表",
       "dropDatabase": "删除数据库",
       "queryData": "查询数据",
+      "showDDL": "查看 DDL",
       "rename": "重命名",
       "dropTable": "删除表",
       "refresh": "刷新",

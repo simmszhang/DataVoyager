@@ -345,6 +345,26 @@ export const api = {
     invoke<string>("build_insert_sql", { id, table, cells }),
   showCreateTable: (id: number, database: string, table: string) =>
     invoke<string>("show_create_table", { id, database, table }),
+  getPrimaryKey: (id: number, database: string, table: string) =>
+    invoke<string[]>("get_primary_key", { id, database, table }),
+  batchDeleteRows: (
+    id: number,
+    database: string,
+    table: string,
+    pkColumn: string,
+    pkValues: string[],
+    confirmed: boolean
+  ) =>
+    invoke<QueryOutput>("batch_delete_rows", {
+      id,
+      database,
+      table,
+      pk_column: pkColumn,
+      pk_values: pkValues,
+      confirmed,
+    }),
+  batchInsertRows: (id: number, database: string, table: string, rows: EditCell[][]) =>
+    invoke<QueryOutput>("batch_insert_rows", { id, database, table, rows }),
   executeEdit: (
     id: number,
     database: string | null,

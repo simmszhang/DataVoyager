@@ -1117,6 +1117,137 @@ pub async fn show_create_table(
 }
 
 #[tauri::command]
+pub async fn get_primary_key(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    table: String,
+) -> Result<Vec<String>> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
+
+    let driver_id = active.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+
+    let sql = format!(
+        "SHOW KEYS FROM {} WHERE Key_name = 'PRIMARY'",
+        dialect.quote_identifier(&table)
+    );
+
+    let output = execute_buffered(
+        active.conn.as_mut(),
+        Some(&database),
+        &sql,
+        &ExecOpts::default(),
+    )
+    .await?;
+
+    // 提取 Column_name（第 5 列，索引 4）
+    let mut pk_columns = Vec::new();
+    if let Some(result_set) = output.first_result_set() {
+        for row in &result_set.rows {
+            if let Some(cell) = row.get(4) {
+                pk_columns.push(cell.to_display_string());
+            }
+        }
+    }
+
+    Ok(pk_columns)
+}
+
+#[tauri::command]
+pub async fn batch_delete_rows(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    table: String,
+    pk_column: String,
+    pk_values: Vec<String>,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let driver_id = entry.lock().await.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+
+    // 生成 DELETE 语句
+    let placeholders = pk_values
+        .iter()
+        .map(|v| dialect.quote_string(v))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = format!(
+        "DELETE FROM {} WHERE {} IN ({})",
+        dialect.quote_identifier(&table),
+        dialect.quote_identifier(&pk_column),
+        placeholders
+    );
+
+    // 走 guard_dangerous 确认
+    guard_dangerous(&sql, confirmed)?;
+
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
+pub async fn batch_insert_rows(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    table: String,
+    rows: Vec<Vec<(String, ColumnType, String)>>,
+) -> Result<QueryOutput> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let driver_id = entry.lock().await.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+
+    if rows.is_empty() {
+        return Err(DbError::Other("No rows to insert".into()));
+    }
+
+    // 解析所有行并生成多个 INSERT 语句（简化方案：逐行插入）
+    let mut sqls = Vec::new();
+    for row in &rows {
+        let parsed = parse_cells(row)?;
+        let columns: Vec<String> = parsed.iter().map(|(n, _)| n.clone()).collect();
+        let values: Vec<dby_core::value::Value> = parsed.into_iter().map(|(_, v)| v).collect();
+        
+        let sql = dby_core::edit::build_insert(dialect, &table, &columns, &values);
+        sqls.push(sql);
+    }
+
+    // 合并为单个 SQL（使用分号连接）
+    let combined_sql = sqls.join(";\n");
+
+    run_ddl(state.inner(), id, Some(database), combined_sql).await
+}
+
+#[tauri::command]
 pub async fn execute_edit(
     state: State<'_, Arc<AppState>>,
     id: u64,

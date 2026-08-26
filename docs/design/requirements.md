@@ -18,6 +18,9 @@
 | R8 | 侧边栏 schema 管理（库/表 CRUD）+ 右键菜单 + 项目→连接→库表树 | P2 | 中 | 已实现 | — |
 | R9 | 大型任务代码走多子代理并行（需求分析后按规模自动执行） | P2 | 中 | 已定（见 D1） | AGENTS.md |
 | R10 | 安装 superpowers 开发技能 | P2 | 小 | 已实现 | ~/.dsh/skills/ |
+| R11 | 连接生命周期重构：新建连接**自动保存**并归属项目显示；断开**不删除**连接、可复用（重连）；移除侧边栏「已保存连接」专栏；连接节点右键菜单显示 **打开/关闭连接**（方向变更，取代 #6 的「保存连接开关」） | P1 | 中 | 已实现（命令面加 `config_id` 关联 + 前端树改造）；**重连失败反馈 + 凭据补救路径已补（#70）** | commands.rs / state.rs / App.tsx / SchemaTree.tsx / ConnectionDialog.tsx；顺带修复 #49、#70 |
+| R12 | 右键菜单完善：(1) 全局屏蔽浏览器原生右键菜单；(2) Schema 树补齐各级节点右键菜单（分类/视图/函数/存储过程/触发器/列）+ 修复视图删除 bug（DROP TABLE → DROP VIEW）；(3) ResultsGrid 新增右键菜单（复制单元格/行/INSERT、设 NULL） | P1 | 大 | 已实现（feat/context-menu-r12，6 commits）| specs/2026-08-19-context-menu-design.md；新增 5 个后端命令（drop_view/drop_routine/drop_trigger/truncate_table/build_insert_sql）+ 表节点「复制名称/清空表」+ ResultsGrid 4 菜单项；**实际简化版**：因 Schema 树暂未实现分类/视图/函数等高级节点，仅为现有表节点补齐菜单，视图/函数菜单待未来 Schema 树扩展时补充 |
+| R13 | 表管理与数据编辑增强：(A) 表右键菜单新增"查看 DDL"（插入编辑器）；(B) 可视化表结构编辑器（列定义+索引管理，ALTER 语句显示在侧边栏/底部）；(C) ResultsGrid 工具栏（新增/删除/保存/刷新按钮 + 行多选 checkbox） | P1 | 大 | 待评审 | 拆分为 3 个子任务：A(小)、B(大)、C(中)；依赖 R12 的右键菜单基础设施 |
 
 ## 二、流程 / 决策变更
 

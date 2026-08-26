@@ -2,7 +2,6 @@
   "app": {
     "empty": {
       "noConnection": "No database connection",
-      "noSavedConnections": "No saved connections",
       "selectTableOrRun": "Select a table or enter SQL, then click Run"
     },
     "status": {
@@ -34,8 +33,7 @@
     },
     "sidebar": {
       "projects": "Projects",
-      "connections": "Connections",
-      "saved": "Saved"
+      "connections": "Connections"
     },
     "welcome": {
       "title": "dby — Lightweight cross-platform database client",

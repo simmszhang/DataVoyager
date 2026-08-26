@@ -2,7 +2,6 @@
   "app": {
     "empty": {
       "noConnection": "未连接数据库",
-      "noSavedConnections": "无已保存连接",
       "selectTableOrRun": "选择一个表或输入 SQL 后点击「运行」"
     },
     "status": {
@@ -34,8 +33,7 @@
     },
     "sidebar": {
       "projects": "项目",
-      "connections": "连接",
-      "saved": "已保存"
+      "connections": "连接"
     },
     "welcome": {
       "title": "dby — 轻量级跨平台数据库客户端",

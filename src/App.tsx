@@ -6,7 +6,6 @@ import {
   displayCell,
   DriverInfo,
   EditCell,
-  SavedConnection,
   StreamEvent,
   UNKNOWN_COLUMN_TYPE,
 } from "./api";
@@ -51,7 +50,6 @@ export default function App() {
   } | null>(null);
   const [pendingWarn, setPendingWarn] = useState<{ sql: string } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
   const [pendingEdit, setPendingEdit] = useState<{
     sql: string;
     table: string;
@@ -78,17 +76,8 @@ export default function App() {
         if (ps.length > 0) setProjectId(ps[0].id);
       })
       .catch(() => {});
-    refreshSaved();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  async function refreshSaved() {
-    try {
-      setSavedConnections(await api.listSavedConnections(null));
-    } catch {
-      /* ignore */
-    }
-  }
 
   /// 连接成功后：刷新连接列表 + 打开标签。
   async function finishConnect() {
@@ -101,31 +90,12 @@ export default function App() {
     if (newest.database) {
       updateWorkspace(newest.id, { selectedDb: newest.database });
     }
-    await refreshSaved();
   }
 
   async function handleConnected() {
     setShowDialog(false);
     try {
       await finishConnect();
-    } catch (e) {
-      setStatus(errToString(e));
-    }
-  }
-
-  async function handleReconnect(configId: string) {
-    try {
-      await api.reconnect(configId);
-      await finishConnect();
-    } catch (e) {
-      setStatus(errToString(e));
-    }
-  }
-
-  async function handleDeleteSaved(configId: string) {
-    try {
-      await api.deleteSavedConnection(configId);
-      await refreshSaved();
     } catch (e) {
       setStatus(errToString(e));
     }
@@ -551,35 +521,6 @@ export default function App() {
             onShowDDL={handleShowDDL}
             onEditStructure={handleEditStructure}
           />
-
-          <div className="sidebar-head">
-            <span className="section-title">{t("app.sidebar.saved")}</span>
-          </div>
-          <div className="conn-list">
-            {savedConnections
-              .filter((c) => c.project_id === projectId)
-              .map((c) => (
-                <div key={c.id} className="list-item conn">
-                  <span className="conn-dot" />
-                  <span className="ellipsis" title={`${c.user}@${c.host}:${c.port}`}>
-                    {c.name}
-                  </span>
-                  <button className="icon-btn" title={t("app.action.connect")} onClick={() => handleReconnect(c.id)}>
-                    ↻
-                  </button>
-                  <button
-                    className="icon-btn"
-                    title={t("app.action.delete")}
-                    onClick={() => handleDeleteSaved(c.id)}
-                  >
-                    🗑
-                  </button>
-                </div>
-              ))}
-            {savedConnections.filter((c) => c.project_id === projectId).length === 0 && (
-              <div className="empty">{t("app.empty.noSavedConnections")}</div>
-            )}
-          </div>
         </aside>
 
         <main className="main">

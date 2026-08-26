@@ -66,6 +66,8 @@ pub fn run() {
             commands::get_primary_key,
             commands::batch_delete_rows,
             commands::batch_insert_rows,
+            commands::get_table_structure,
+            commands::alter_table,
             commands::execute_edit,
             commands::create_database,
             commands::drop_database,

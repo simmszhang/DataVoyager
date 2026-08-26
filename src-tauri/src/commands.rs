@@ -1247,6 +1247,205 @@ pub async fn batch_insert_rows(
     run_ddl(state.inner(), id, Some(database), combined_sql).await
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TableColumn {
+    pub name: String,
+    pub type_name: String,
+    pub nullable: bool,
+    pub default_value: Option<String>,
+    pub comment: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_table_structure(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    table: String,
+) -> Result<Vec<TableColumn>> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
+
+    let driver_id = active.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+
+    // SHOW FULL COLUMNS FROM table
+    let sql = format!(
+        "SHOW FULL COLUMNS FROM {}",
+        dialect.quote_identifier(&table)
+    );
+
+    let output = execute_buffered(
+        active.conn.as_mut(),
+        Some(&database),
+        &sql,
+        &ExecOpts::default(),
+    )
+    .await?;
+
+    let mut columns = Vec::new();
+    if let Some(result_set) = output.first_result_set() {
+        for row in &result_set.rows {
+            let name = row.get(0).map(|v| v.to_display_string()).unwrap_or_default();
+            let type_name = row.get(1).map(|v| v.to_display_string()).unwrap_or_default();
+            let nullable = row
+                .get(3)
+                .map(|v| v.to_display_string().to_uppercase() == "YES")
+                .unwrap_or(true);
+            let default_value = row.get(5).and_then(|v| {
+                if matches!(v, dby_core::value::Value::Null) {
+                    None
+                } else {
+                    Some(v.to_display_string())
+                }
+            });
+            let comment = row.get(8).and_then(|v| {
+                let s = v.to_display_string();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
+            });
+
+            columns.push(TableColumn {
+                name,
+                type_name,
+                nullable,
+                default_value,
+                comment,
+            });
+        }
+    }
+
+    Ok(columns)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum AlterTableOp {
+    AddColumn {
+        name: String,
+        type_name: String,
+        nullable: bool,
+        default_value: Option<String>,
+    },
+    DropColumn {
+        name: String,
+    },
+    ModifyColumn {
+        name: String,
+        type_name: String,
+        nullable: bool,
+        default_value: Option<String>,
+    },
+    RenameColumn {
+        old_name: String,
+        new_name: String,
+    },
+}
+
+#[tauri::command]
+pub async fn alter_table(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    table: String,
+    operations: Vec<AlterTableOp>,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let driver_id = entry.lock().await.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+
+    // 生成 ALTER TABLE 语句
+    let mut clauses = Vec::new();
+    for op in operations {
+        match op {
+            AlterTableOp::AddColumn {
+                name,
+                type_name,
+                nullable,
+                default_value,
+            } => {
+                let mut clause = format!(
+                    "ADD COLUMN {} {}",
+                    dialect.quote_identifier(&name),
+                    type_name
+                );
+                if !nullable {
+                    clause.push_str(" NOT NULL");
+                }
+                if let Some(default) = default_value {
+                    clause.push_str(&format!(" DEFAULT {}", dialect.quote_string(&default)));
+                }
+                clauses.push(clause);
+            }
+            AlterTableOp::DropColumn { name } => {
+                clauses.push(format!("DROP COLUMN {}", dialect.quote_identifier(&name)));
+            }
+            AlterTableOp::ModifyColumn {
+                name,
+                type_name,
+                nullable,
+                default_value,
+            } => {
+                let mut clause = format!(
+                    "MODIFY COLUMN {} {}",
+                    dialect.quote_identifier(&name),
+                    type_name
+                );
+                if !nullable {
+                    clause.push_str(" NOT NULL");
+                }
+                if let Some(default) = default_value {
+                    clause.push_str(&format!(" DEFAULT {}", dialect.quote_string(&default)));
+                }
+                clauses.push(clause);
+            }
+            AlterTableOp::RenameColumn { old_name, new_name } => {
+                clauses.push(format!(
+                    "RENAME COLUMN {} TO {}",
+                    dialect.quote_identifier(&old_name),
+                    dialect.quote_identifier(&new_name)
+                ));
+            }
+        }
+    }
+
+    if clauses.is_empty() {
+        return Err(DbError::Other("No operations specified".into()));
+    }
+
+    let sql = format!(
+        "ALTER TABLE {} {}",
+        dialect.quote_identifier(&table),
+        clauses.join(", ")
+    );
+
+    // 走 guard_dangerous 确认
+    guard_dangerous(&sql, confirmed)?;
+
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
 #[tauri::command]
 pub async fn execute_edit(
     state: State<'_, Arc<AppState>>,

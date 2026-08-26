@@ -112,6 +112,7 @@
     "truncateSuccess": "表已清空",
     "menu": {
       "disconnect": "断开连接",
+      "reconnect": "打开连接",
       "createTable": "新建表",
       "dropDatabase": "删除数据库",
       "queryData": "查询数据",

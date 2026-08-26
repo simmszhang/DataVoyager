@@ -14,6 +14,7 @@ interface Props {
   activeId: number | null;
   onSelectConnection: (id: number) => void;
   onDisconnect: (id: number) => void;
+  onReconnect: (configId: string) => void; // R11: 重连已保存的连接
   onOpenTable: (connId: number, database: string, table: string) => void;
   onShowDDL: (connId: number, database: string, table: string) => void;
   onEditStructure: (connId: number, database: string, table: string) => void;
@@ -39,6 +40,7 @@ export default function SchemaTree({
   activeId,
   onSelectConnection,
   onDisconnect,
+  onReconnect,
   onOpenTable,
   onShowDDL,
   onEditStructure,
@@ -208,7 +210,17 @@ export default function SchemaTree({
   if (menu) {
     const node = menu.node;
     if (node.kind === "connection") {
-      menuItems.push({ label: t("tree.menu.disconnect"), action: () => onDisconnect(node.connId) });
+      // R11: 根据连接状态显示不同菜单
+      const conn = connections.find((c) => c.id === node.connId);
+      const isActive = activeId === node.connId;
+      
+      if (isActive) {
+        // 已连接：显示"断开连接"
+        menuItems.push({ label: t("tree.menu.disconnect"), action: () => onDisconnect(node.connId) });
+      } else if (conn?.config_id) {
+        // 未连接但有 config_id：显示"打开连接"
+        menuItems.push({ label: t("tree.menu.reconnect"), action: () => onReconnect(conn.config_id!) });
+      }
     } else if (node.kind === "database") {
       menuItems.push({
         label: t("tree.menu.createTable"),

@@ -224,6 +224,7 @@ export interface ConnectResponse {
   project_id: string;
   database: string;
   server_version: string;
+  config_id?: string; // R11: 保存连接后返回配置 ID
 }
 
 export interface ConnectionSummary {
@@ -233,6 +234,7 @@ export interface ConnectionSummary {
   project_id: string;
   database: string;
   server_version: string;
+  config_id?: string; // R11: 用于断开后重连
 }
 
 /// list_saved_connections 的脱敏视图：不含任何 secret 字段（#22）。

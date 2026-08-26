@@ -29,6 +29,8 @@ pub struct ConnectResponse {
     pub project_id: String,
     pub database: String,
     pub server_version: String,
+    /// 关联的保存配置 ID（R11）：save=true 时返回，用于后续重连。
+    pub config_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -39,6 +41,8 @@ pub struct ConnectionSummary {
     pub project_id: String,
     pub database: String,
     pub server_version: String,
+    /// 关联的保存配置 ID（R11）：用于断开后重连。
+    pub config_id: Option<String>,
 }
 
 /// 已保存连接的脱敏视图：仅暴露非敏感字段，绝不携带密码/私钥（#22）。
@@ -67,6 +71,7 @@ fn snapshot(a: &ActiveConnection) -> ConnectionSummary {
         project_id: a.project_id.clone(),
         database: a.database.clone(),
         server_version: a.server_version.clone(),
+        config_id: a.config_id.clone(), // R11
     }
 }
 
@@ -131,8 +136,8 @@ pub async fn connect(
     // 先建会话，再按 save/remember_password 决定是否持久化（#6/#43）。
     let config = ConnectionConfig {
         id: uuid::Uuid::new_v4().to_string(),
-        project_id,
-        name,
+        project_id: project_id.clone(),
+        name: name.clone(),
         driver: params.driver.clone(),
         host: params.host.clone(),
         port: params.port,
@@ -143,7 +148,7 @@ pub async fn connect(
         color: None,
         params: params.params.clone(),
     };
-    persist_connection(
+    let config_id = persist_connection(
         state.inner(),
         resp.id,
         config,
@@ -156,7 +161,28 @@ pub async fn connect(
         },
     )
     .await?;
-    Ok(resp)
+    
+    // R11: 更新 ActiveConnection 的 config_id
+    if let Some(ref cid) = config_id {
+        let conn_lock = {
+            let guard = state.connections.lock().unwrap();
+            guard.get(&resp.id).cloned()
+        };
+        if let Some(conn_lock) = conn_lock {
+            let mut conn = conn_lock.lock().await;
+            conn.config_id = Some(cid.clone());
+        }
+    }
+    
+    Ok(ConnectResponse {
+        id: resp.id,
+        name,
+        driver_id: resp.driver_id,
+        project_id,
+        database: resp.database,
+        server_version: resp.server_version,
+        config_id,
+    })
 }
 
 /// 钥匙串读写单元：`store_secrets` / `delete_secrets` 的注入点。
@@ -168,8 +194,8 @@ struct SecretsIo {
 
 /// 连接成功后的持久化控制流（#6/#43）：
 ///
-/// - `save=false`：不写 config、不写 keyring（no-op）。
-/// - `save=true`：secrets 先存（`remember_password` 时）、config 后存；任一步失败都回滚已写内容并断开会话，不留半失败态。
+/// - `save=false`：不写 config、不写 keyring（no-op），返回 `None`。
+/// - `save=true`：secrets 先存（`remember_password` 时）、config 后存；任一步失败都回滚已写内容并断开会话，不留半失败态。返回 `Some(config_id)`。
 ///
 /// `secrets` 是钥匙串读写单元，真实实现为 `store_secrets` / `delete_secrets`。
 async fn persist_connection(
@@ -180,9 +206,9 @@ async fn persist_connection(
     save: bool,
     remember_password: bool,
     secrets: SecretsIo,
-) -> Result<()> {
+) -> Result<Option<String>> {
     if !save {
-        return Ok(());
+        return Ok(None);
     }
     let config_id = config.id.clone();
     // secrets 先存、config 后存：避免「config 已存但 secret 缺失」半失败态
@@ -200,7 +226,7 @@ async fn persist_connection(
         state.connections.lock().unwrap().remove(&resp_id);
         return Err(e);
     }
-    Ok(())
+    Ok(Some(config_id))
 }
 
 /// 把连接配置追加到内存并落盘；save 失败回滚内存 push（不留幽灵配置），
@@ -284,6 +310,7 @@ async fn open_session(
         project_id: project_id.clone(),
         database: database.clone(),
         server_version: server_version.clone(),
+        config_id: None, // R11: 初始为 None，connect 命令会在保存后更新
         params: params.clone(),
         needs_reconnect: false,
         conn,
@@ -300,6 +327,7 @@ async fn open_session(
         project_id,
         database,
         server_version,
+        config_id: None, // R11: open_session 不涉及持久化，由 connect 更新
     })
 }
 
@@ -410,13 +438,26 @@ pub async fn reconnect(
     }
 
     let params = build_params_from_config(&config, &secrets);
-    open_session(
+    let mut resp = open_session(
         state.inner(),
         &params,
         config.project_id.clone(),
         config.name.clone(),
     )
-    .await
+    .await?;
+    
+    // R11: 更新 ActiveConnection 的 config_id（重连时复用已有配置）
+    let conn_lock = {
+        let guard = state.connections.lock().unwrap();
+        guard.get(&resp.id).cloned()
+    };
+    if let Some(conn_lock) = conn_lock {
+        let mut conn = conn_lock.lock().await;
+        conn.config_id = Some(config_id.clone());
+    }
+    resp.config_id = Some(config_id);
+    
+    Ok(resp)
 }
 
 #[tauri::command]

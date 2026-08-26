@@ -17,6 +17,8 @@ pub struct ActiveConnection {
     pub project_id: String,
     pub database: String,
     pub server_version: String,
+    /// 关联的保存配置 ID（R11）：新建连接自动保存并记录，用于断开后重连。
+    pub config_id: Option<String>,
     /// 连接参数（secrets 仅存内存）：毒化后自动重连所需。
     pub params: ConnectParams,
     /// 秒断（取消关 socket）后置 true，下次使用前由 `ensure_connected` 重连。

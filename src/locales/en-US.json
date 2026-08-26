@@ -112,6 +112,7 @@
     "truncateSuccess": "Table truncated successfully",
     "menu": {
       "disconnect": "Disconnect",
+      "reconnect": "Connect",
       "createTable": "New Table",
       "dropDatabase": "Drop Database",
       "queryData": "Query Data",

@@ -401,6 +401,25 @@ export default function App() {
     }
   }
 
+  // R11: 重连已保存的连接
+  async function handleReconnect(configId: string) {
+    try {
+      const resp = await api.reconnect(configId);
+      const list = await api.listConnections();
+      setConnections(list);
+      const conn = list.find((c) => c.id === resp.id);
+      if (conn) {
+        openConnection(conn);
+        setStatus(t("app.status.connected", { name: resp.name, version: resp.server_version }));
+        if (resp.database) {
+          updateWorkspace(resp.id, { selectedDb: resp.database });
+        }
+      }
+    } catch (e) {
+      setStatus(errToString(e));
+    }
+  }
+
   // 快捷键 Ctrl/Cmd+Enter 运行（ref 避免闭包过期）。
   const runRef = useRef<() => void>(() => {});
   runRef.current = handleRun;
@@ -517,6 +536,7 @@ export default function App() {
             activeId={activeId}
             onSelectConnection={handleSelectConnection}
             onDisconnect={handleDisconnect}
+            onReconnect={handleReconnect}
             onOpenTable={handleOpenTable}
             onShowDDL={handleShowDDL}
             onEditStructure={handleEditStructure}

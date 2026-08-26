@@ -16,6 +16,7 @@ interface Props {
   onDisconnect: (id: number) => void;
   onOpenTable: (connId: number, database: string, table: string) => void;
   onShowDDL: (connId: number, database: string, table: string) => void;
+  onEditStructure: (connId: number, database: string, table: string) => void;
 }
 
 /// 结构化节点 key：JSON 编码，避免 `:` 拼接/切分在库表名含分隔符时失效（defect #3）。
@@ -40,6 +41,7 @@ export default function SchemaTree({
   onDisconnect,
   onOpenTable,
   onShowDDL,
+  onEditStructure,
 }: Props) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -221,6 +223,10 @@ export default function SchemaTree({
       menuItems.push({
         label: t("tree.menu.showDDL"),
         action: () => onShowDDL(node.connId, node.database, node.name),
+      });
+      menuItems.push({
+        label: t("tree.menu.editStructure"),
+        action: () => onEditStructure(node.connId, node.database, node.name),
       });
       menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
       menuItems.push({ label: t("tree.menu.rename"), action: () => handleRenameTable(node) });

@@ -14,6 +14,7 @@ import { useStore } from "./store";
 import { errToString } from "./i18n";
 import ConnectionDialog from "./components/ConnectionDialog";
 import SchemaTree from "./components/SchemaTree";
+import TableStructureEditor from "./components/TableStructureEditor";
 import QueryEditor from "./components/QueryEditor";
 import ResultsGrid from "./components/ResultsGrid";
 import ExportDialog from "./components/ExportDialog";
@@ -57,6 +58,11 @@ export default function App() {
     database: string | null;
     pk: EditCell[];
     set: EditCell[];
+  } | null>(null);
+  const [structureEditor, setStructureEditor] = useState<{
+    connId: number;
+    database: string;
+    table: string;
   } | null>(null);
 
   const activeConn = connections.find((c) => c.id === activeId) ?? null;
@@ -154,6 +160,10 @@ export default function App() {
     } catch (e) {
       setStatus(errToString(e));
     }
+  }
+
+  function handleEditStructure(connId: number, database: string, table: string) {
+    setStructureEditor({ connId, database, table });
   }
 
   async function runQuery(id: number, sql: string, confirmed: boolean = false) {
@@ -539,6 +549,7 @@ export default function App() {
             onDisconnect={handleDisconnect}
             onOpenTable={handleOpenTable}
             onShowDDL={handleShowDDL}
+            onEditStructure={handleEditStructure}
           />
 
           <div className="sidebar-head">
@@ -750,6 +761,15 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {structureEditor && (
+        <TableStructureEditor
+          connId={structureEditor.connId}
+          database={structureEditor.database}
+          table={structureEditor.table}
+          onClose={() => setStructureEditor(null)}
+        />
       )}
     </div>
   );

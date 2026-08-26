@@ -118,6 +118,7 @@
       "dropDatabase": "Drop Database",
       "queryData": "Query Data",
       "showDDL": "Show DDL",
+      "editStructure": "Edit Structure",
       "rename": "Rename",
       "dropTable": "Drop Table",
       "refresh": "Refresh",
@@ -228,5 +229,21 @@
     "tables": "Tables",
     "noTables": "No tables",
     "columns": "Columns"
+  },
+  "structure": {
+    "title": "Table Structure - {{table}}",
+    "loading": "Loading…",
+    "addColumn": "Add Column",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving…",
+    "column": {
+      "name": "Column Name",
+      "type": "Type",
+      "nullable": "Nullable",
+      "default": "Default",
+      "comment": "Comment",
+      "actions": "Actions"
+    }
   }
 }

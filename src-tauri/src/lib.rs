@@ -62,6 +62,7 @@ pub fn run() {
             commands::export_result,
             commands::build_edit_sql,
             commands::build_insert_sql,
+            commands::show_create_table,
             commands::execute_edit,
             commands::create_database,
             commands::drop_database,

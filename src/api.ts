@@ -343,6 +343,8 @@ export const api = {
   ) => invoke<string>("build_edit_sql", { id, table, pk, set }),
   buildInsertSql: (id: number, table: string, cells: EditCell[]) =>
     invoke<string>("build_insert_sql", { id, table, cells }),
+  showCreateTable: (id: number, database: string, table: string) =>
+    invoke<string>("show_create_table", { id, database, table }),
   executeEdit: (
     id: number,
     database: string | null,

@@ -1044,6 +1044,409 @@ pub async fn build_edit_sql(
 }
 
 #[tauri::command]
+pub async fn build_insert_sql(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    table: String,
+    cells: Vec<(String, ColumnType, String)>,
+) -> Result<String> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let driver_id = entry.lock().await.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+
+    let parsed = parse_cells(&cells)?;
+    let columns: Vec<String> = parsed.iter().map(|(n, _)| n.clone()).collect();
+    let values: Vec<dby_core::value::Value> = parsed.into_iter().map(|(_, v)| v).collect();
+
+    Ok(dby_core::edit::build_insert(
+        driver.dialect(),
+        &table,
+        &columns,
+        &values,
+    ))
+}
+
+#[tauri::command]
+pub async fn show_create_table(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    table: String,
+) -> Result<String> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
+
+    let driver_id = active.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+    
+    let sql = format!("SHOW CREATE TABLE {}", dialect.quote_identifier(&table));
+
+    let output = execute_buffered(
+        active.conn.as_mut(),
+        Some(&database),
+        &sql,
+        &ExecOpts::default(),
+    )
+    .await?;
+
+    // 提取第一个结果集的第一行第二列（Create Table）
+    if let Some(result_set) = output.first_result_set() {
+        if let Some(row) = result_set.rows.first() {
+            if let Some(cell) = row.get(1) {
+                return Ok(cell.to_display_string());
+            }
+        }
+    }
+
+    Err(DbError::Other("No CREATE TABLE result".into()))
+}
+
+#[tauri::command]
+pub async fn get_primary_key(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    table: String,
+) -> Result<Vec<String>> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
+
+    let driver_id = active.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+
+    let sql = format!(
+        "SHOW KEYS FROM {} WHERE Key_name = 'PRIMARY'",
+        dialect.quote_identifier(&table)
+    );
+
+    let output = execute_buffered(
+        active.conn.as_mut(),
+        Some(&database),
+        &sql,
+        &ExecOpts::default(),
+    )
+    .await?;
+
+    // 提取 Column_name（第 5 列，索引 4）
+    let mut pk_columns = Vec::new();
+    if let Some(result_set) = output.first_result_set() {
+        for row in &result_set.rows {
+            if let Some(cell) = row.get(4) {
+                pk_columns.push(cell.to_display_string());
+            }
+        }
+    }
+
+    Ok(pk_columns)
+}
+
+#[tauri::command]
+pub async fn batch_delete_rows(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    table: String,
+    pk_column: String,
+    pk_values: Vec<String>,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let driver_id = entry.lock().await.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+
+    // 生成 DELETE 语句
+    let placeholders = pk_values
+        .iter()
+        .map(|v| dialect.quote_string(v))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = format!(
+        "DELETE FROM {} WHERE {} IN ({})",
+        dialect.quote_identifier(&table),
+        dialect.quote_identifier(&pk_column),
+        placeholders
+    );
+
+    // 走 guard_dangerous 确认
+    guard_dangerous(&sql, confirmed)?;
+
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
+pub async fn batch_insert_rows(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    table: String,
+    rows: Vec<Vec<(String, ColumnType, String)>>,
+) -> Result<QueryOutput> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let driver_id = entry.lock().await.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+
+    if rows.is_empty() {
+        return Err(DbError::Other("No rows to insert".into()));
+    }
+
+    // 解析所有行并生成多个 INSERT 语句（简化方案：逐行插入）
+    let mut sqls = Vec::new();
+    for row in &rows {
+        let parsed = parse_cells(row)?;
+        let columns: Vec<String> = parsed.iter().map(|(n, _)| n.clone()).collect();
+        let values: Vec<dby_core::value::Value> = parsed.into_iter().map(|(_, v)| v).collect();
+        
+        let sql = dby_core::edit::build_insert(dialect, &table, &columns, &values);
+        sqls.push(sql);
+    }
+
+    // 合并为单个 SQL（使用分号连接）
+    let combined_sql = sqls.join(";\n");
+
+    run_ddl(state.inner(), id, Some(database), combined_sql).await
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TableColumn {
+    pub name: String,
+    pub type_name: String,
+    pub nullable: bool,
+    pub default_value: Option<String>,
+    pub comment: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_table_structure(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    table: String,
+) -> Result<Vec<TableColumn>> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
+
+    let driver_id = active.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+
+    // SHOW FULL COLUMNS FROM table
+    let sql = format!(
+        "SHOW FULL COLUMNS FROM {}",
+        dialect.quote_identifier(&table)
+    );
+
+    let output = execute_buffered(
+        active.conn.as_mut(),
+        Some(&database),
+        &sql,
+        &ExecOpts::default(),
+    )
+    .await?;
+
+    let mut columns = Vec::new();
+    if let Some(result_set) = output.first_result_set() {
+        for row in &result_set.rows {
+            let name = row.get(0).map(|v| v.to_display_string()).unwrap_or_default();
+            let type_name = row.get(1).map(|v| v.to_display_string()).unwrap_or_default();
+            let nullable = row
+                .get(3)
+                .map(|v| v.to_display_string().to_uppercase() == "YES")
+                .unwrap_or(true);
+            let default_value = row.get(5).and_then(|v| {
+                if matches!(v, dby_core::value::Value::Null) {
+                    None
+                } else {
+                    Some(v.to_display_string())
+                }
+            });
+            let comment = row.get(8).and_then(|v| {
+                let s = v.to_display_string();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
+            });
+
+            columns.push(TableColumn {
+                name,
+                type_name,
+                nullable,
+                default_value,
+                comment,
+            });
+        }
+    }
+
+    Ok(columns)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum AlterTableOp {
+    AddColumn {
+        name: String,
+        type_name: String,
+        nullable: bool,
+        default_value: Option<String>,
+    },
+    DropColumn {
+        name: String,
+    },
+    ModifyColumn {
+        name: String,
+        type_name: String,
+        nullable: bool,
+        default_value: Option<String>,
+    },
+    RenameColumn {
+        old_name: String,
+        new_name: String,
+    },
+}
+
+#[tauri::command]
+pub async fn alter_table(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    table: String,
+    operations: Vec<AlterTableOp>,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let driver_id = entry.lock().await.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+
+    // 生成 ALTER TABLE 语句
+    let mut clauses = Vec::new();
+    for op in operations {
+        match op {
+            AlterTableOp::AddColumn {
+                name,
+                type_name,
+                nullable,
+                default_value,
+            } => {
+                let mut clause = format!(
+                    "ADD COLUMN {} {}",
+                    dialect.quote_identifier(&name),
+                    type_name
+                );
+                if !nullable {
+                    clause.push_str(" NOT NULL");
+                }
+                if let Some(default) = default_value {
+                    clause.push_str(&format!(" DEFAULT {}", dialect.quote_string(&default)));
+                }
+                clauses.push(clause);
+            }
+            AlterTableOp::DropColumn { name } => {
+                clauses.push(format!("DROP COLUMN {}", dialect.quote_identifier(&name)));
+            }
+            AlterTableOp::ModifyColumn {
+                name,
+                type_name,
+                nullable,
+                default_value,
+            } => {
+                let mut clause = format!(
+                    "MODIFY COLUMN {} {}",
+                    dialect.quote_identifier(&name),
+                    type_name
+                );
+                if !nullable {
+                    clause.push_str(" NOT NULL");
+                }
+                if let Some(default) = default_value {
+                    clause.push_str(&format!(" DEFAULT {}", dialect.quote_string(&default)));
+                }
+                clauses.push(clause);
+            }
+            AlterTableOp::RenameColumn { old_name, new_name } => {
+                clauses.push(format!(
+                    "RENAME COLUMN {} TO {}",
+                    dialect.quote_identifier(&old_name),
+                    dialect.quote_identifier(&new_name)
+                ));
+            }
+        }
+    }
+
+    if clauses.is_empty() {
+        return Err(DbError::Other("No operations specified".into()));
+    }
+
+    let sql = format!(
+        "ALTER TABLE {} {}",
+        dialect.quote_identifier(&table),
+        clauses.join(", ")
+    );
+
+    // 走 guard_dangerous 确认
+    guard_dangerous(&sql, confirmed)?;
+
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
 pub async fn execute_edit(
     state: State<'_, Arc<AppState>>,
     id: u64,
@@ -1238,6 +1641,63 @@ pub async fn drop_table(
 ) -> Result<QueryOutput> {
     let driver = driver_for(state.inner(), id).await?;
     let sql = dby_core::ddl::build_drop_table(driver.dialect(), &name);
+    guard_dangerous(&sql, confirmed)?;
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
+pub async fn drop_view(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    name: String,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_drop_view(driver.dialect(), &name);
+    guard_dangerous(&sql, confirmed)?;
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
+pub async fn drop_routine(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    kind: String,
+    name: String,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_drop_routine(driver.dialect(), &kind, &name);
+    guard_dangerous(&sql, confirmed)?;
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
+pub async fn drop_trigger(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    name: String,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_drop_trigger(driver.dialect(), &name);
+    guard_dangerous(&sql, confirmed)?;
+    run_ddl(state.inner(), id, Some(database), sql).await
+}
+
+#[tauri::command]
+pub async fn truncate_table(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    name: String,
+    confirmed: bool,
+) -> Result<QueryOutput> {
+    let driver = driver_for(state.inner(), id).await?;
+    let sql = dby_core::ddl::build_truncate_table(driver.dialect(), &name);
     guard_dangerous(&sql, confirmed)?;
     run_ddl(state.inner(), id, Some(database), sql).await
 }

@@ -61,6 +61,27 @@ pub fn build_drop_table(dialect: &dyn Dialect, table: &str) -> String {
     format!("DROP TABLE {};", dialect.quote_identifier(table))
 }
 
+/// 生成 DROP VIEW 语句
+pub fn build_drop_view(dialect: &dyn Dialect, name: &str) -> String {
+    format!("DROP VIEW {};", dialect.quote_identifier(name))
+}
+
+/// 生成 DROP FUNCTION/PROCEDURE 语句
+pub fn build_drop_routine(dialect: &dyn Dialect, kind: &str, name: &str) -> String {
+    // kind: "FUNCTION" | "PROCEDURE"
+    format!("DROP {} {};", kind, dialect.quote_identifier(name))
+}
+
+/// 生成 DROP TRIGGER 语句
+pub fn build_drop_trigger(dialect: &dyn Dialect, name: &str) -> String {
+    format!("DROP TRIGGER {};", dialect.quote_identifier(name))
+}
+
+/// 生成 TRUNCATE TABLE 语句
+pub fn build_truncate_table(dialect: &dyn Dialect, name: &str) -> String {
+    format!("TRUNCATE TABLE {};", dialect.quote_identifier(name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,5 +141,21 @@ mod tests {
         let d = TestDialect;
         assert_eq!(build_rename_table(&d, "a", "b"), "RENAME TABLE `a` TO `b`;");
         assert_eq!(build_drop_table(&d, "t"), "DROP TABLE `t`;");
+    }
+
+    #[test]
+    fn drop_view_and_routine() {
+        let d = TestDialect;
+        assert_eq!(build_drop_view(&d, "v1"), "DROP VIEW `v1`;");
+        assert_eq!(
+            build_drop_routine(&d, "FUNCTION", "fn1"),
+            "DROP FUNCTION `fn1`;"
+        );
+        assert_eq!(
+            build_drop_routine(&d, "PROCEDURE", "sp1"),
+            "DROP PROCEDURE `sp1`;"
+        );
+        assert_eq!(build_drop_trigger(&d, "trg1"), "DROP TRIGGER `trg1`;");
+        assert_eq!(build_truncate_table(&d, "t1"), "TRUNCATE TABLE `t1`;");
     }
 }

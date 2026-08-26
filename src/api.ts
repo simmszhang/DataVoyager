@@ -104,6 +104,32 @@ export interface ColumnInfo {
   comment?: string | null;
 }
 
+export interface TableColumn {
+  name: string;
+  type_name: string;
+  nullable: boolean;
+  default_value: string | null;
+  comment: string | null;
+}
+
+export type AlterTableOp =
+  | {
+      op: "add_column";
+      name: string;
+      type_name: string;
+      nullable: boolean;
+      default_value: string | null;
+    }
+  | { op: "drop_column"; name: string }
+  | {
+      op: "modify_column";
+      name: string;
+      type_name: string;
+      nullable: boolean;
+      default_value: string | null;
+    }
+  | { op: "rename_column"; old_name: string; new_name: string };
+
 /// 结构化列类型（与 dby-core `ColumnTypeBase` 的 serde snake_case tag 一致，#32）。
 export type ColumnTypeBase =
   | "bool"
@@ -341,6 +367,39 @@ export const api = {
     pk: EditCell[],
     set: EditCell[],
   ) => invoke<string>("build_edit_sql", { id, table, pk, set }),
+  buildInsertSql: (id: number, table: string, cells: EditCell[]) =>
+    invoke<string>("build_insert_sql", { id, table, cells }),
+  showCreateTable: (id: number, database: string, table: string) =>
+    invoke<string>("show_create_table", { id, database, table }),
+  getPrimaryKey: (id: number, database: string, table: string) =>
+    invoke<string[]>("get_primary_key", { id, database, table }),
+  batchDeleteRows: (
+    id: number,
+    database: string,
+    table: string,
+    pkColumn: string,
+    pkValues: string[],
+    confirmed: boolean
+  ) =>
+    invoke<QueryOutput>("batch_delete_rows", {
+      id,
+      database,
+      table,
+      pk_column: pkColumn,
+      pk_values: pkValues,
+      confirmed,
+    }),
+  batchInsertRows: (id: number, database: string, table: string, rows: EditCell[][]) =>
+    invoke<QueryOutput>("batch_insert_rows", { id, database, table, rows }),
+  getTableStructure: (id: number, database: string, table: string) =>
+    invoke<TableColumn[]>("get_table_structure", { id, database, table }),
+  alterTable: (
+    id: number,
+    database: string,
+    table: string,
+    operations: AlterTableOp[],
+    confirmed: boolean
+  ) => invoke<QueryOutput>("alter_table", { id, database, table, operations, confirmed }),
   executeEdit: (
     id: number,
     database: string | null,
@@ -364,6 +423,14 @@ export const api = {
   ) => invoke<QueryOutput>("rename_table", { id, database, oldName, newName, confirmed }),
   dropTable: (id: number, database: string, name: string, confirmed: boolean) =>
     invoke<QueryOutput>("drop_table", { id, database, name, confirmed }),
+  dropView: (id: number, database: string, name: string, confirmed: boolean) =>
+    invoke<QueryOutput>("drop_view", { id, database, name, confirmed }),
+  dropRoutine: (id: number, database: string, kind: string, name: string, confirmed: boolean) =>
+    invoke<QueryOutput>("drop_routine", { id, database, kind, name, confirmed }),
+  dropTrigger: (id: number, database: string, name: string, confirmed: boolean) =>
+    invoke<QueryOutput>("drop_trigger", { id, database, name, confirmed }),
+  truncateTable: (id: number, database: string, name: string, confirmed: boolean) =>
+    invoke<QueryOutput>("truncate_table", { id, database, name, confirmed }),
 
   listProjects: () => invoke<Project[]>("list_projects"),
   createProject: (name: string) => invoke<Project>("create_project", { name }),

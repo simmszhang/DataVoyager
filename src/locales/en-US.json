@@ -8,6 +8,7 @@
     "status": {
       "connected": "Connected {{name}} ({{version}})",
       "tableSqlFailed": "Failed to generate table browse SQL",
+      "ddlLoaded": "DDL loaded to editor",
       "rowsReturned": "{{count}} rows returned",
       "rowsAffected": "{{count}} rows affected",
       "cancelledAutoReconnect": "Cancelled; the connection will auto-reconnect",
@@ -106,13 +107,28 @@
     "renamePrompt": "New table name",
     "dropDatabaseConfirm": "Delete database \"{{name}}\"? This cannot be undone.",
     "dropTableConfirm": "Delete table \"{{name}}\"? This cannot be undone.",
+    "dropViewConfirm": "Delete view \"{{name}}\"? This cannot be undone.",
+    "dropRoutineConfirm": "Delete \"{{name}}\"? This cannot be undone.",
+    "dropTriggerConfirm": "Delete trigger \"{{name}}\"? This cannot be undone.",
+    "truncateConfirm": "Truncate all data in table \"{{name}}\"? This cannot be undone!",
+    "truncateSuccess": "Table truncated successfully",
     "menu": {
       "disconnect": "Disconnect",
       "createTable": "New Table",
       "dropDatabase": "Drop Database",
       "queryData": "Query Data",
+      "showDDL": "Show DDL",
+      "editStructure": "Edit Structure",
       "rename": "Rename",
-      "dropTable": "Drop Table"
+      "dropTable": "Drop Table",
+      "refresh": "Refresh",
+      "copyName": "Copy Name",
+      "truncateTable": "Truncate Table",
+      "dropView": "Drop View",
+      "dropRoutine": "Drop",
+      "dropTrigger": "Drop Trigger",
+      "copyColumnName": "Copy Column Name",
+      "copyColumnDef": "Copy Column Definition"
     }
   },
   "editor": {
@@ -143,7 +159,22 @@
     "truncatedSuffix": " (result truncated)",
     "truncated": "· truncated",
     "truncatedTitle": "Result set exceeds the per-batch row limit; only received rows are shown",
-    "doubleClickEdit": " · double-click a cell to edit"
+    "doubleClickEdit": " · double-click a cell to edit",
+    "deleteConfirm": "Delete {{count}} selected rows? This cannot be undone.",
+    "menu": {
+      "copyCell": "Copy Cell",
+      "copyRowAsJson": "Copy Row as JSON",
+      "copyAsInsert": "Copy as INSERT Statement",
+      "setNull": "Set to NULL"
+    },
+    "toolbar": {
+      "add": "Add",
+      "delete": "Delete",
+      "save": "Save",
+      "refresh": "Refresh",
+      "selected": "{{count}} selected",
+      "totalRows": "{{count}} rows"
+    }
   },
   "export": {
     "dialog": {
@@ -198,5 +229,21 @@
     "tables": "Tables",
     "noTables": "No tables",
     "columns": "Columns"
+  },
+  "structure": {
+    "title": "Table Structure - {{table}}",
+    "loading": "Loading…",
+    "addColumn": "Add Column",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving…",
+    "column": {
+      "name": "Column Name",
+      "type": "Type",
+      "nullable": "Nullable",
+      "default": "Default",
+      "comment": "Comment",
+      "actions": "Actions"
+    }
   }
 }

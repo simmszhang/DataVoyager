@@ -67,7 +67,7 @@ export default function QueryEditor({
           autocommit
         </label>
       </div>
-      <div className="editor">
+      <div className="editor" onContextMenu={(e) => e.stopPropagation()}>
         <CodeMirror
           value={value}
           height="100%"

@@ -14,6 +14,7 @@ import { useStore } from "./store";
 import { errToString } from "./i18n";
 import ConnectionDialog from "./components/ConnectionDialog";
 import SchemaTree from "./components/SchemaTree";
+import TableStructureEditor from "./components/TableStructureEditor";
 import QueryEditor from "./components/QueryEditor";
 import ResultsGrid from "./components/ResultsGrid";
 import ExportDialog from "./components/ExportDialog";
@@ -57,6 +58,11 @@ export default function App() {
     database: string | null;
     pk: EditCell[];
     set: EditCell[];
+  } | null>(null);
+  const [structureEditor, setStructureEditor] = useState<{
+    connId: number;
+    database: string;
+    table: string;
   } | null>(null);
 
   const activeConn = connections.find((c) => c.id === activeId) ?? null;
@@ -144,6 +150,20 @@ export default function App() {
       updateWorkspace(connId, { error: errToString(e) });
       setStatus(t("app.status.tableSqlFailed"));
     }
+  }
+
+  async function handleShowDDL(connId: number, database: string, table: string) {
+    try {
+      const ddl = await api.showCreateTable(connId, database, table);
+      updateWorkspace(connId, { query: ddl });
+      setStatus(t("app.status.ddlLoaded"));
+    } catch (e) {
+      setStatus(errToString(e));
+    }
+  }
+
+  function handleEditStructure(connId: number, database: string, table: string) {
+    setStructureEditor({ connId, database, table });
   }
 
   async function runQuery(id: number, sql: string, confirmed: boolean = false) {
@@ -426,7 +446,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="app">
+    <div className="app" onContextMenu={(e) => e.preventDefault()}>
       <header className="topbar">
         <div className="brand">dby</div>
         <div className="conn-info">
@@ -528,6 +548,8 @@ export default function App() {
             onSelectConnection={handleSelectConnection}
             onDisconnect={handleDisconnect}
             onOpenTable={handleOpenTable}
+            onShowDDL={handleShowDDL}
+            onEditStructure={handleEditStructure}
           />
 
           <div className="sidebar-head">
@@ -581,7 +603,18 @@ export default function App() {
                 {ws.error ? (
                   <div className="error-box">{ws.error}</div>
                 ) : ws.result ? (
-                  <ResultsGrid result={ws.result} onEditCell={handleEditCell} />
+                  <ResultsGrid
+                    result={ws.result}
+                    onEditCell={handleEditCell}
+                    tableName={ws.selectedTable}
+                    connId={activeId}
+                    database={ws.selectedDb}
+                    onRefresh={() => {
+                      if (activeId && ws.selectedTable && ws.query) {
+                        runQuery(activeId, ws.query);
+                      }
+                    }}
+                  />
                 ) : (
                   <div className="empty-state">{t("app.empty.selectTableOrRun")}</div>
                 )}
@@ -728,6 +761,15 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {structureEditor && (
+        <TableStructureEditor
+          connId={structureEditor.connId}
+          database={structureEditor.database}
+          table={structureEditor.table}
+          onClose={() => setStructureEditor(null)}
+        />
       )}
     </div>
   );

@@ -8,6 +8,7 @@
     "status": {
       "connected": "已连接 {{name}}（{{version}}）",
       "tableSqlFailed": "生成表浏览 SQL 失败",
+      "ddlLoaded": "DDL 已加载到编辑器",
       "rowsReturned": "返回 {{count}} 行",
       "rowsAffected": "影响 {{count}} 行",
       "cancelledAutoReconnect": "已取消，连接将自动重连",
@@ -106,13 +107,28 @@
     "renamePrompt": "新表名",
     "dropDatabaseConfirm": "确定删除数据库「{{name}}」？此操作不可撤销。",
     "dropTableConfirm": "确定删除表「{{name}}」？此操作不可撤销。",
+    "dropViewConfirm": "确定删除视图「{{name}}」？此操作不可撤销。",
+    "dropRoutineConfirm": "确定删除「{{name}}」？此操作不可撤销。",
+    "dropTriggerConfirm": "确定删除触发器「{{name}}」？此操作不可撤销。",
+    "truncateConfirm": "确定清空表「{{name}}」的所有数据？此操作不可撤销！",
+    "truncateSuccess": "表已清空",
     "menu": {
       "disconnect": "断开连接",
       "createTable": "新建表",
       "dropDatabase": "删除数据库",
       "queryData": "查询数据",
+      "showDDL": "查看 DDL",
+      "editStructure": "编辑表结构",
       "rename": "重命名",
-      "dropTable": "删除表"
+      "dropTable": "删除表",
+      "refresh": "刷新",
+      "copyName": "复制名称",
+      "truncateTable": "清空表",
+      "dropView": "删除视图",
+      "dropRoutine": "删除",
+      "dropTrigger": "删除触发器",
+      "copyColumnName": "复制列名",
+      "copyColumnDef": "复制列定义"
     }
   },
   "editor": {
@@ -143,7 +159,22 @@
     "truncatedSuffix": "（结果已截断）",
     "truncated": "· 结果已截断",
     "truncatedTitle": "结果集超出单组行数上限，仅展示已接收的部分行",
-    "doubleClickEdit": " · 双击单元格编辑"
+    "doubleClickEdit": " · 双击单元格编辑",
+    "deleteConfirm": "确定删除选中的 {{count}} 行？此操作不可撤销。",
+    "menu": {
+      "copyCell": "复制单元格",
+      "copyRowAsJson": "复制行（JSON）",
+      "copyAsInsert": "复制为 INSERT 语句",
+      "setNull": "设为 NULL"
+    },
+    "toolbar": {
+      "add": "新增",
+      "delete": "删除",
+      "save": "保存",
+      "refresh": "刷新",
+      "selected": "已选 {{count}} 行",
+      "totalRows": "共 {{count}} 行"
+    }
   },
   "export": {
     "dialog": {
@@ -198,5 +229,21 @@
     "tables": "表",
     "noTables": "没有表",
     "columns": "列"
+  },
+  "structure": {
+    "title": "表结构 - {{table}}",
+    "loading": "加载中…",
+    "addColumn": "新增列",
+    "cancel": "取消",
+    "save": "保存",
+    "saving": "保存中…",
+    "column": {
+      "name": "列名",
+      "type": "类型",
+      "nullable": "可空",
+      "default": "默认值",
+      "comment": "注释",
+      "actions": "操作"
+    }
   }
 }

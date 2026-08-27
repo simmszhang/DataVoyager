@@ -567,3 +567,41 @@
   - `src/components/SchemaTree.tsx:510-527` - 视图/函数/存储过程/触发器节点添加"查看 DDL"菜单项
 - **优先级**：P2 - 提升用户体验
 - **规模**：小型 - 单个命令 + 前端菜单项添加
+
+---
+
+### #77 函数/存储过程 DDL 显示 sql_mode 而非 DDL ✅
+
+- **现象**: 右键函数/存储过程节点，点击"查看 DDL"显示 STRICT_TRANS_TABLES,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION 而非 DDL 语句
+- **原因**: SHOW CREATE FUNCTION/PROCEDURE 返回 4 列（名称 + sql_mode + DDL + charset），而 show_create_object 命令错误地返回了第 2 列（sql_mode）而非第 3 列（DDL）
+- **修复**:
+  - src-tauri/src/commands.rs:340-372 - 根据对象类型选择正确的列索引（TABLE/VIEW 用第 2 列，FUNCTION/PROCEDURE/TRIGGER 用第 3 列）
+- **优先级**: P1 - 功能不可用
+- **规模**: 小型 - 单行逻辑修复
+
+---
+
+### #78 缺少执行存储过程的快捷方式 ✅
+
+- **需求**: 在存储过程节点右键菜单中添加"执行"选项，快速生成 CALL 语句
+- **实现**:
+  - src-tauri/src/commands.rs:315-338 - 添加 execute_procedure 命令，生成 CALL procedure_name() 语句
+  - src-tauri/src/lib.rs:71 - 注册新命令
+  - src/api.ts:404-405 - 添加 executeProcedure API
+  - src/App.tsx:194-202 - 添加 handleExecuteProcedure 处理函数
+  - src/components/SchemaTree.tsx:31 - 添加 onExecuteProcedure prop
+  - src/components/SchemaTree.tsx:528-531 - 存储过程节点添加"执行"菜单项
+  - src/locales/*.json - 添加翻译
+- **优先级**: P2 - 提升用户体验
+- **规模**: 小型 - 单个命令 + 前端菜单项添加
+
+---
+
+### #79 DDL 模板缺少 DETERMINISTIC 特性 ✅
+
+- **现象**: 创建函数 SQL 执行报错 ERROR 1418: This function has none of DETERMINISTIC, NO SQL, or READS SQL DATA
+- **原因**: MySQL 开启二进制日志时，创建函数必须指定 DETERMINISTIC、NO SQL 或 READS SQL DATA 特性
+- **修复**:
+  - src/components/SchemaTree.tsx:564 - 函数 DDL 模板添加 DETERMINISTIC 关键字
+- **优先级**: P1 - 模板不可用
+- **规模**: 小型 - 单行模板修改

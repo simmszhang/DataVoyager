@@ -400,7 +400,7 @@ export const api = {
   showCreateTable: (id: number, database: string, table: string) =>
     invoke<string>("show_create_table", { id, database, table }),
   showCreateObject: (id: number, database: string, objectName: string, objectType: string) =>
-    invoke<string>("show_create_object", { id, database, object_name: objectName, object_type: objectType }),
+    invoke<string>("show_create_object", { id, database, objectName, objectType }),
   getPrimaryKey: (id: number, database: string, table: string) =>
     invoke<string[]>("get_primary_key", { id, database, table }),
   batchDeleteRows: (

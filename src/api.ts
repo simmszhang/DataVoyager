@@ -94,6 +94,24 @@ export interface TableInfo {
   comment?: string | null;
 }
 
+export interface ViewInfo {
+  name: string;
+  definer?: string | null;
+}
+
+export interface ProcedureInfo {
+  name: string;
+  kind: string; // "PROCEDURE" | "FUNCTION"
+  definer?: string | null;
+}
+
+export interface TriggerInfo {
+  name: string;
+  timing: string;
+  event: string;
+  table?: string | null;
+}
+
 export interface ColumnInfo {
   name: string;
   type_name: string;
@@ -336,6 +354,14 @@ export const api = {
     invoke<TableInfo[]>("list_tables", { id, database }),
   listColumns: (id: number, database: string, table: string) =>
     invoke<ColumnInfo[]>("list_columns", { id, database, table }),
+  listViews: (id: number, database: string) =>
+    invoke<ViewInfo[]>("list_views", { id, database }),
+  listFunctions: (id: number, database: string) =>
+    invoke<ProcedureInfo[]>("list_functions", { id, database }),
+  listProcedures: (id: number, database: string) =>
+    invoke<ProcedureInfo[]>("list_procedures", { id, database }),
+  listTriggers: (id: number, database: string) =>
+    invoke<TriggerInfo[]>("list_triggers", { id, database }),
   buildTableSelect: (connId: number, table: string) =>
     invoke<string>("build_table_select", { id: connId, table }),
   executeQuery: (id: number, database: string | null, sql: string, confirmed: boolean) =>

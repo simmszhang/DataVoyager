@@ -11,7 +11,7 @@ use dby_core::ddl::ColumnDef;
 use dby_core::driver::{execute_buffered, ConnectParams, Driver, DriverInfo};
 use dby_core::error::{DbError, Result};
 use dby_core::history::{ExecutionRecord, HistoryFilter, StatementHit};
-use dby_core::metadata::{ColumnInfo, ColumnType, TableInfo};
+use dby_core::metadata::{ColumnInfo, ColumnType, TableInfo, ViewInfo, TriggerInfo, ProcedureInfo};
 use dby_core::project::Project;
 use dby_core::query::{
     CancellationToken, ExecOpts, QueryOutput, ResultSink, SqlOrigin, StreamEvent,
@@ -585,6 +585,80 @@ pub async fn list_columns(
     let mut active = entry.lock().await;
     ensure_connected(state.inner(), &mut active).await?;
     active.conn.columns(&database, &table).await
+}
+
+#[tauri::command]
+pub async fn list_views(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+) -> Result<Vec<ViewInfo>> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
+    active.conn.views(&database).await
+}
+
+#[tauri::command]
+pub async fn list_functions(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+) -> Result<Vec<ProcedureInfo>> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
+    let all = active.conn.procedures(&database).await?;
+    Ok(all.into_iter().filter(|p| p.kind == "FUNCTION").collect())
+}
+
+#[tauri::command]
+pub async fn list_procedures(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+) -> Result<Vec<ProcedureInfo>> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
+    let all = active.conn.procedures(&database).await?;
+    Ok(all.into_iter().filter(|p| p.kind == "PROCEDURE").collect())
+}
+
+#[tauri::command]
+pub async fn list_triggers(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+) -> Result<Vec<TriggerInfo>> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+    let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
+    active.conn.triggers(&database, None).await
 }
 
 /// 表浏览 SQL 生成（#4）：SQL 由 dby-core 的 `Dialect` 生成，前端只传结构化参数。

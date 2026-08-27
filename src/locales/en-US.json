@@ -102,11 +102,17 @@
     "empty": {
       "noConnections": "No connections"
     },
+    "tables": "Tables",
+    "views": "Views",
+    "functions": "Functions",
+    "procedures": "Procedures",
+    "triggers": "Triggers",
     "renamePrompt": "New table name",
     "dropDatabaseConfirm": "Delete database \"{{name}}\"? This cannot be undone.",
     "dropTableConfirm": "Delete table \"{{name}}\"? This cannot be undone.",
     "dropViewConfirm": "Delete view \"{{name}}\"? This cannot be undone.",
-    "dropRoutineConfirm": "Delete \"{{name}}\"? This cannot be undone.",
+    "dropFunctionConfirm": "Delete function \"{{name}}\"? This cannot be undone.",
+    "dropProcedureConfirm": "Delete procedure \"{{name}}\"? This cannot be undone.",
     "dropTriggerConfirm": "Delete trigger \"{{name}}\"? This cannot be undone.",
     "truncateConfirm": "Truncate all data in table \"{{name}}\"? This cannot be undone!",
     "truncateSuccess": "Table truncated successfully",
@@ -124,7 +130,8 @@
       "copyName": "Copy Name",
       "truncateTable": "Truncate Table",
       "dropView": "Drop View",
-      "dropRoutine": "Drop",
+      "dropFunction": "Drop Function",
+      "dropProcedure": "Drop Procedure",
       "dropTrigger": "Drop Trigger",
       "copyColumnName": "Copy Column Name",
       "copyColumnDef": "Copy Column Definition"

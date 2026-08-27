@@ -10,6 +10,7 @@ use dby_core::driver::{Capabilities, ConnectParams, Connection, Driver};
 use dby_core::error::{DbError, Result};
 use dby_core::metadata::{
     ColumnInfo, ColumnType, ForeignKeyInfo, IndexInfo, ProcedureInfo, TableInfo, TriggerInfo,
+    ViewInfo,
 };
 use dby_core::query::{ExecOpts, ResultSink, StreamEvent};
 use dby_core::value::Value;
@@ -162,6 +163,25 @@ impl Connection for MysqlConnection {
             .collect())
     }
 
+    async fn views(&mut self, schema: &str) -> Result<Vec<ViewInfo>> {
+        let sql = "SELECT TABLE_NAME, DEFINER \
+                   FROM information_schema.VIEWS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME";
+        let rows: Vec<Row> = self
+            .conn
+            .as_mut()
+            .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
+            .exec(sql, (schema,))
+            .await
+            .map_err(db_err)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| ViewInfo {
+                name: conv::row_string(&r, 0).unwrap_or_default(),
+                definer: conv::row_string(&r, 1),
+            })
+            .collect())
+    }
+
     async fn columns(&mut self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>> {
         // 元数据路径：#33 解析 COLUMN_TYPE 得结构化 column_type，type_name 同源生成；
         // 附加字段补充 parse_column_type 从字符串取不到的 charset/collation 名与长度/精度。
@@ -286,15 +306,26 @@ impl Connection for MysqlConnection {
         Ok(fks)
     }
 
-    async fn triggers(&mut self, schema: &str, table: &str) -> Result<Vec<TriggerInfo>> {
-        let sql = "SELECT TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION \
-                   FROM information_schema.TRIGGERS \
-                   WHERE TRIGGER_SCHEMA = ? AND EVENT_OBJECT_TABLE = ? ORDER BY TRIGGER_NAME";
+    async fn triggers(&mut self, schema: &str, table: Option<&str>) -> Result<Vec<TriggerInfo>> {
+        let (sql, params): (&str, Vec<String>) = match table {
+            Some(t) => (
+                "SELECT TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION, EVENT_OBJECT_TABLE \
+                 FROM information_schema.TRIGGERS \
+                 WHERE TRIGGER_SCHEMA = ? AND EVENT_OBJECT_TABLE = ? ORDER BY TRIGGER_NAME",
+                vec![schema.to_string(), t.to_string()],
+            ),
+            None => (
+                "SELECT TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION, EVENT_OBJECT_TABLE \
+                 FROM information_schema.TRIGGERS \
+                 WHERE TRIGGER_SCHEMA = ? ORDER BY TRIGGER_NAME",
+                vec![schema.to_string()],
+            ),
+        };
         let rows: Vec<Row> = self
             .conn
             .as_mut()
             .ok_or_else(|| DbError::ConnectionNotFound("mysql".into()))?
-            .exec(sql, (schema, table))
+            .exec(sql, params)
             .await
             .map_err(db_err)?;
         Ok(rows
@@ -303,12 +334,13 @@ impl Connection for MysqlConnection {
                 name: conv::row_string(&r, 0).unwrap_or_default(),
                 timing: conv::row_string(&r, 1).unwrap_or_default(),
                 event: conv::row_string(&r, 2).unwrap_or_default(),
+                table: conv::row_string(&r, 3),
             })
             .collect())
     }
 
     async fn procedures(&mut self, schema: &str) -> Result<Vec<ProcedureInfo>> {
-        let sql = "SELECT ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.ROUTINES \
+        let sql = "SELECT ROUTINE_NAME, ROUTINE_TYPE, DEFINER FROM information_schema.ROUTINES \
                    WHERE ROUTINE_SCHEMA = ? ORDER BY ROUTINE_NAME";
         let rows: Vec<Row> = self
             .conn
@@ -322,6 +354,7 @@ impl Connection for MysqlConnection {
             .map(|r| ProcedureInfo {
                 name: conv::row_string(&r, 0).unwrap_or_default(),
                 kind: conv::row_string(&r, 1).unwrap_or_default(),
+                definer: conv::row_string(&r, 2),
             })
             .collect())
     }

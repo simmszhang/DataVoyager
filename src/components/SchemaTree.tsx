@@ -1,13 +1,17 @@
 import { ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, ColumnInfo, ConnectionSummary, TableInfo } from "../api";
+import { api, ColumnInfo, ConnectionSummary, TableInfo, ViewInfo, ProcedureInfo, TriggerInfo } from "../api";
 import { errToString } from "../i18n";
 import CreateTableDialog from "./CreateTableDialog";
 
 type MenuNode =
   | { kind: "connection"; connId: number }
   | { kind: "database"; connId: number; name: string }
-  | { kind: "table"; connId: number; database: string; name: string };
+  | { kind: "table"; connId: number; database: string; name: string }
+  | { kind: "view"; connId: number; database: string; name: string }
+  | { kind: "function"; connId: number; database: string; name: string }
+  | { kind: "procedure"; connId: number; database: string; name: string }
+  | { kind: "trigger"; connId: number; database: string; name: string };
 
 interface Props {
   connections: ConnectionSummary[];
@@ -24,7 +28,16 @@ interface Props {
 type NodeKey =
   | { kind: "conn"; connId: number }
   | { kind: "db"; connId: number; db: string }
+  | { kind: "tables-group"; connId: number; db: string }
+  | { kind: "views-group"; connId: number; db: string }
+  | { kind: "functions-group"; connId: number; db: string }
+  | { kind: "procedures-group"; connId: number; db: string }
+  | { kind: "triggers-group"; connId: number; db: string }
   | { kind: "table"; connId: number; db: string; table: string }
+  | { kind: "view"; connId: number; db: string; view: string }
+  | { kind: "function"; connId: number; db: string; func: string }
+  | { kind: "procedure"; connId: number; db: string; proc: string }
+  | { kind: "trigger"; connId: number; db: string; trigger: string }
   | { kind: "column"; connId: number; db: string; table: string; column: string };
 
 const keyOf = (k: NodeKey): string => JSON.stringify(k);
@@ -32,8 +45,21 @@ const parseKey = (key: string): NodeKey => JSON.parse(key);
 
 const connKey = (id: number) => keyOf({ kind: "conn", connId: id });
 const dbKey = (id: number, db: string) => keyOf({ kind: "db", connId: id, db });
+const tablesGroupKey = (id: number, db: string) => keyOf({ kind: "tables-group", connId: id, db });
+const viewsGroupKey = (id: number, db: string) => keyOf({ kind: "views-group", connId: id, db });
+const functionsGroupKey = (id: number, db: string) => keyOf({ kind: "functions-group", connId: id, db });
+const proceduresGroupKey = (id: number, db: string) => keyOf({ kind: "procedures-group", connId: id, db });
+const triggersGroupKey = (id: number, db: string) => keyOf({ kind: "triggers-group", connId: id, db });
 const tblKey = (id: number, db: string, t: string) =>
   keyOf({ kind: "table", connId: id, db, table: t });
+const viewKey = (id: number, db: string, v: string) =>
+  keyOf({ kind: "view", connId: id, db, view: v });
+const funcKey = (id: number, db: string, f: string) =>
+  keyOf({ kind: "function", connId: id, db, func: f });
+const procKey = (id: number, db: string, p: string) =>
+  keyOf({ kind: "procedure", connId: id, db, proc: p });
+const triggerKey = (id: number, db: string, t: string) =>
+  keyOf({ kind: "trigger", connId: id, db, trigger: t });
 
 export default function SchemaTree({
   connections,
@@ -49,6 +75,10 @@ export default function SchemaTree({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dbs, setDbs] = useState<Record<string, string[]>>({});
   const [tables, setTables] = useState<Record<string, TableInfo[]>>({});
+  const [views, setViews] = useState<Record<string, ViewInfo[]>>({});
+  const [functions, setFunctions] = useState<Record<string, ProcedureInfo[]>>({});
+  const [procedures, setProcedures] = useState<Record<string, ProcedureInfo[]>>({});
+  const [triggers, setTriggers] = useState<Record<string, TriggerInfo[]>>({});
   const [columns, setColumns] = useState<Record<string, ColumnInfo[]>>({});
   const [menu, setMenu] = useState<{ x: number; y: number; node: MenuNode } | null>(null);
   const [createTable, setCreateTable] = useState<{ connId: number; database: string } | null>(null);
@@ -61,8 +91,23 @@ export default function SchemaTree({
         const list = await api.listDatabases(node.connId);
         setDbs((p) => ({ ...p, [key]: list }));
       } else if (node.kind === "db") {
+        // Database node doesn't load anything automatically
+        // Children (groups) are always shown
+      } else if (node.kind === "tables-group") {
         const list = await api.listTables(node.connId, node.db);
         setTables((p) => ({ ...p, [key]: list }));
+      } else if (node.kind === "views-group") {
+        const list = await api.listViews(node.connId, node.db);
+        setViews((p) => ({ ...p, [key]: list }));
+      } else if (node.kind === "functions-group") {
+        const list = await api.listFunctions(node.connId, node.db);
+        setFunctions((p) => ({ ...p, [key]: list }));
+      } else if (node.kind === "procedures-group") {
+        const list = await api.listProcedures(node.connId, node.db);
+        setProcedures((p) => ({ ...p, [key]: list }));
+      } else if (node.kind === "triggers-group") {
+        const list = await api.listTriggers(node.connId, node.db);
+        setTriggers((p) => ({ ...p, [key]: list }));
       } else if (node.kind === "table") {
         const list = await api.listColumns(node.connId, node.db, node.table);
         setColumns((p) => ({ ...p, [key]: list }));
@@ -108,7 +153,39 @@ export default function SchemaTree({
     if (!window.confirm(t("tree.dropTableConfirm", { name: n.name }))) return;
     api
       .dropTable(n.connId, n.database, n.name, true)
-      .then(() => loadChildren(dbKey(n.connId, n.database)))
+      .then(() => loadChildren(tablesGroupKey(n.connId, n.database)))
+      .catch((e) => setStatus(errToString(e)));
+  }
+
+  function handleDropView(n: { connId: number; database: string; name: string }) {
+    if (!window.confirm(t("tree.dropViewConfirm", { name: n.name }))) return;
+    api
+      .dropView(n.connId, n.database, n.name, true)
+      .then(() => loadChildren(viewsGroupKey(n.connId, n.database)))
+      .catch((e) => setStatus(errToString(e)));
+  }
+
+  function handleDropFunction(n: { connId: number; database: string; name: string }) {
+    if (!window.confirm(t("tree.dropFunctionConfirm", { name: n.name }))) return;
+    api
+      .dropRoutine(n.connId, n.database, n.name, "FUNCTION", true)
+      .then(() => loadChildren(functionsGroupKey(n.connId, n.database)))
+      .catch((e) => setStatus(errToString(e)));
+  }
+
+  function handleDropProcedure(n: { connId: number; database: string; name: string }) {
+    if (!window.confirm(t("tree.dropProcedureConfirm", { name: n.name }))) return;
+    api
+      .dropRoutine(n.connId, n.database, n.name, "PROCEDURE", true)
+      .then(() => loadChildren(proceduresGroupKey(n.connId, n.database)))
+      .catch((e) => setStatus(errToString(e)));
+  }
+
+  function handleDropTrigger(n: { connId: number; database: string; name: string }) {
+    if (!window.confirm(t("tree.dropTriggerConfirm", { name: n.name }))) return;
+    api
+      .dropTrigger(n.connId, n.database, n.name, true)
+      .then(() => loadChildren(triggersGroupKey(n.connId, n.database)))
       .catch((e) => setStatus(errToString(e)));
   }
 
@@ -164,41 +241,194 @@ export default function SchemaTree({
           </div>,
         );
         if (dExpanded) {
-          for (const t of tables[dk] ?? []) {
-            const tk = tblKey(c.id, db, t.name);
-            const tExpanded = expanded.has(tk);
-            nodes.push(
-              <div
-                key={tk}
-                className="tree-node"
-                style={{ paddingLeft: 40 }}
-                onClick={() => {
-                  toggle(tk);
-                  onOpenTable(c.id, db, t.name);
-                }}
-                onContextMenu={(e) =>
-                  openMenu(e, { kind: "table", connId: c.id, database: db, name: t.name })
+          // Tables group
+          const tablesGk = tablesGroupKey(c.id, db);
+          const tablesGExpanded = expanded.has(tablesGk);
+          nodes.push(
+            <div
+              key={tablesGk}
+              className="tree-node"
+              style={{ paddingLeft: 40 }}
+              onClick={() => toggle(tablesGk)}
+            >
+              <span className="tree-caret">{tablesGExpanded ? "▾" : "▸"}</span>
+              <span className="tree-icon">📁</span>
+              <span className="tree-label">{t("tree.tables")}</span>
+            </div>,
+          );
+          if (tablesGExpanded) {
+            for (const t of tables[tablesGk] ?? []) {
+              const tk = tblKey(c.id, db, t.name);
+              const tExpanded = expanded.has(tk);
+              nodes.push(
+                <div
+                  key={tk}
+                  className="tree-node"
+                  style={{ paddingLeft: 58 }}
+                  onClick={() => {
+                    toggle(tk);
+                    onOpenTable(c.id, db, t.name);
+                  }}
+                  onContextMenu={(e) =>
+                    openMenu(e, { kind: "table", connId: c.id, database: db, name: t.name })
+                  }
+                >
+                  <span className="tree-caret">{tExpanded ? "▾" : "▸"}</span>
+                  <span className="tree-icon">▤</span>
+                  <span className="tree-label ellipsis">{t.name}</span>
+                </div>,
+              );
+              if (tExpanded) {
+                for (const col of columns[tk] ?? []) {
+                  nodes.push(
+                    <div
+                      key={keyOf({ kind: "column", connId: c.id, db, table: t.name, column: col.name })}
+                      className="tree-node leaf"
+                      style={{ paddingLeft: 76 }}
+                    >
+                      <span className="tree-icon">·</span>
+                      <span className="tree-label ellipsis">{col.name}</span>
+                      <span className="tree-col-type">{col.type_name}</span>
+                    </div>,
+                  );
                 }
-              >
-                <span className="tree-caret">{tExpanded ? "▾" : "▸"}</span>
-                <span className="tree-icon">▤</span>
-                <span className="tree-label ellipsis">{t.name}</span>
-              </div>,
-            );
-            if (tExpanded) {
-              for (const col of columns[tk] ?? []) {
-                nodes.push(
-                  <div
-                    key={keyOf({ kind: "column", connId: c.id, db, table: t.name, column: col.name })}
-                    className="tree-node leaf"
-                    style={{ paddingLeft: 58 }}
-                  >
-                    <span className="tree-icon">·</span>
-                    <span className="tree-label ellipsis">{col.name}</span>
-                    <span className="tree-col-type">{col.type_name}</span>
-                  </div>,
-                );
               }
+            }
+          }
+
+          // Views group
+          const viewsGk = viewsGroupKey(c.id, db);
+          const viewsGExpanded = expanded.has(viewsGk);
+          nodes.push(
+            <div
+              key={viewsGk}
+              className="tree-node"
+              style={{ paddingLeft: 40 }}
+              onClick={() => toggle(viewsGk)}
+            >
+              <span className="tree-caret">{viewsGExpanded ? "▾" : "▸"}</span>
+              <span className="tree-icon">📁</span>
+              <span className="tree-label">{t("tree.views")}</span>
+            </div>,
+          );
+          if (viewsGExpanded) {
+            for (const v of views[viewsGk] ?? []) {
+              const vk = viewKey(c.id, db, v.name);
+              nodes.push(
+                <div
+                  key={vk}
+                  className="tree-node leaf"
+                  style={{ paddingLeft: 58 }}
+                  onContextMenu={(e) =>
+                    openMenu(e, { kind: "view", connId: c.id, database: db, name: v.name })
+                  }
+                >
+                  <span className="tree-icon">👁</span>
+                  <span className="tree-label ellipsis">{v.name}</span>
+                </div>,
+              );
+            }
+          }
+
+          // Functions group
+          const functionsGk = functionsGroupKey(c.id, db);
+          const functionsGExpanded = expanded.has(functionsGk);
+          nodes.push(
+            <div
+              key={functionsGk}
+              className="tree-node"
+              style={{ paddingLeft: 40 }}
+              onClick={() => toggle(functionsGk)}
+            >
+              <span className="tree-caret">{functionsGExpanded ? "▾" : "▸"}</span>
+              <span className="tree-icon">📁</span>
+              <span className="tree-label">{t("tree.functions")}</span>
+            </div>,
+          );
+          if (functionsGExpanded) {
+            for (const f of functions[functionsGk] ?? []) {
+              const fk = funcKey(c.id, db, f.name);
+              nodes.push(
+                <div
+                  key={fk}
+                  className="tree-node leaf"
+                  style={{ paddingLeft: 58 }}
+                  onContextMenu={(e) =>
+                    openMenu(e, { kind: "function", connId: c.id, database: db, name: f.name })
+                  }
+                >
+                  <span className="tree-icon">ƒ</span>
+                  <span className="tree-label ellipsis">{f.name}</span>
+                </div>,
+              );
+            }
+          }
+
+          // Procedures group
+          const proceduresGk = proceduresGroupKey(c.id, db);
+          const proceduresGExpanded = expanded.has(proceduresGk);
+          nodes.push(
+            <div
+              key={proceduresGk}
+              className="tree-node"
+              style={{ paddingLeft: 40 }}
+              onClick={() => toggle(proceduresGk)}
+            >
+              <span className="tree-caret">{proceduresGExpanded ? "▾" : "▸"}</span>
+              <span className="tree-icon">📁</span>
+              <span className="tree-label">{t("tree.procedures")}</span>
+            </div>,
+          );
+          if (proceduresGExpanded) {
+            for (const p of procedures[proceduresGk] ?? []) {
+              const pk = procKey(c.id, db, p.name);
+              nodes.push(
+                <div
+                  key={pk}
+                  className="tree-node leaf"
+                  style={{ paddingLeft: 58 }}
+                  onContextMenu={(e) =>
+                    openMenu(e, { kind: "procedure", connId: c.id, database: db, name: p.name })
+                  }
+                >
+                  <span className="tree-icon">⚙</span>
+                  <span className="tree-label ellipsis">{p.name}</span>
+                </div>,
+              );
+            }
+          }
+
+          // Triggers group
+          const triggersGk = triggersGroupKey(c.id, db);
+          const triggersGExpanded = expanded.has(triggersGk);
+          nodes.push(
+            <div
+              key={triggersGk}
+              className="tree-node"
+              style={{ paddingLeft: 40 }}
+              onClick={() => toggle(triggersGk)}
+            >
+              <span className="tree-caret">{triggersGExpanded ? "▾" : "▸"}</span>
+              <span className="tree-icon">📁</span>
+              <span className="tree-label">{t("tree.triggers")}</span>
+            </div>,
+          );
+          if (triggersGExpanded) {
+            for (const tr of triggers[triggersGk] ?? []) {
+              const trk = triggerKey(c.id, db, tr.name);
+              nodes.push(
+                <div
+                  key={trk}
+                  className="tree-node leaf"
+                  style={{ paddingLeft: 58 }}
+                  onContextMenu={(e) =>
+                    openMenu(e, { kind: "trigger", connId: c.id, database: db, name: tr.name })
+                  }
+                >
+                  <span className="tree-icon">⚡</span>
+                  <span className="tree-label ellipsis">{tr.name}</span>
+                </div>,
+              );
             }
           }
         }
@@ -244,6 +474,18 @@ export default function SchemaTree({
       menuItems.push({ label: t("tree.menu.rename"), action: () => handleRenameTable(node) });
       menuItems.push({ label: t("tree.menu.truncateTable"), action: () => handleTruncateTable(node) });
       menuItems.push({ label: t("tree.menu.dropTable"), action: () => handleDropTable(node) });
+    } else if (node.kind === "view") {
+      menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
+      menuItems.push({ label: t("tree.menu.dropView"), action: () => handleDropView(node) });
+    } else if (node.kind === "function") {
+      menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
+      menuItems.push({ label: t("tree.menu.dropFunction"), action: () => handleDropFunction(node) });
+    } else if (node.kind === "procedure") {
+      menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
+      menuItems.push({ label: t("tree.menu.dropProcedure"), action: () => handleDropProcedure(node) });
+    } else if (node.kind === "trigger") {
+      menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
+      menuItems.push({ label: t("tree.menu.dropTrigger"), action: () => handleDropTrigger(node) });
     }
   }
 

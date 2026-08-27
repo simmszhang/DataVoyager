@@ -102,11 +102,17 @@
     "empty": {
       "noConnections": "暂无连接"
     },
+    "tables": "表",
+    "views": "视图",
+    "functions": "函数",
+    "procedures": "存储过程",
+    "triggers": "触发器",
     "renamePrompt": "新表名",
     "dropDatabaseConfirm": "确定删除数据库「{{name}}」？此操作不可撤销。",
     "dropTableConfirm": "确定删除表「{{name}}」？此操作不可撤销。",
     "dropViewConfirm": "确定删除视图「{{name}}」？此操作不可撤销。",
-    "dropRoutineConfirm": "确定删除「{{name}}」？此操作不可撤销。",
+    "dropFunctionConfirm": "确定删除函数「{{name}}」？此操作不可撤销。",
+    "dropProcedureConfirm": "确定删除存储过程「{{name}}」？此操作不可撤销。",
     "dropTriggerConfirm": "确定删除触发器「{{name}}」？此操作不可撤销。",
     "truncateConfirm": "确定清空表「{{name}}」的所有数据？此操作不可撤销！",
     "truncateSuccess": "表已清空",
@@ -124,7 +130,8 @@
       "copyName": "复制名称",
       "truncateTable": "清空表",
       "dropView": "删除视图",
-      "dropRoutine": "删除",
+      "dropFunction": "删除函数",
+      "dropProcedure": "删除存储过程",
       "dropTrigger": "删除触发器",
       "copyColumnName": "复制列名",
       "copyColumnDef": "复制列定义"

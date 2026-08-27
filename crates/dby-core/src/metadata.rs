@@ -101,10 +101,19 @@ pub struct ForeignKeyInfo {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ViewInfo {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub definer: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct TriggerInfo {
     pub name: String,
     pub timing: String,
     pub event: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub table: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,6 +121,8 @@ pub struct ProcedureInfo {
     pub name: String,
     /// "PROCEDURE" / "FUNCTION"
     pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub definer: Option<String>,
 }
 
 #[cfg(test)]

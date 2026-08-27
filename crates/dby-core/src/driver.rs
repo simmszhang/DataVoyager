@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::dialect::Dialect;
 use crate::error::{DbError, Result};
 use crate::metadata::{
-    ColumnInfo, ForeignKeyInfo, IndexInfo, ProcedureInfo, TableInfo, TriggerInfo,
+    ColumnInfo, ForeignKeyInfo, IndexInfo, ProcedureInfo, TableInfo, TriggerInfo, ViewInfo,
 };
 use crate::query::{CollectingSink, ExecOpts, QueryOutput, ResultSink};
 
@@ -119,10 +119,11 @@ pub trait Connection: Send {
     async fn catalogs(&mut self) -> Result<Vec<String>>;
     async fn schemas(&mut self, catalog: Option<&str>) -> Result<Vec<String>>;
     async fn tables(&mut self, schema: &str) -> Result<Vec<TableInfo>>;
+    async fn views(&mut self, schema: &str) -> Result<Vec<ViewInfo>>;
     async fn columns(&mut self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>>;
     async fn indexes(&mut self, schema: &str, table: &str) -> Result<Vec<IndexInfo>>;
     async fn foreign_keys(&mut self, schema: &str, table: &str) -> Result<Vec<ForeignKeyInfo>>;
-    async fn triggers(&mut self, schema: &str, table: &str) -> Result<Vec<TriggerInfo>>;
+    async fn triggers(&mut self, schema: &str, table: Option<&str>) -> Result<Vec<TriggerInfo>>;
     async fn procedures(&mut self, schema: &str) -> Result<Vec<ProcedureInfo>>;
     async fn table_ddl(&mut self, schema: &str, table: &str) -> Result<String>;
 

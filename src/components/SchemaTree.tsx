@@ -561,7 +561,7 @@ export default function SchemaTree({
       menuItems.push({
         label: t("tree.menu.createFunction"),
         action: () => {
-          const template = `-- 创建函数\nCREATE FUNCTION \`${node.database}\`.\`function_name\`() RETURNS INT\nBEGIN\n  RETURN 1;\nEND;\n`;
+          const template = `-- 创建函数\nCREATE FUNCTION \`${node.database}\`.\`function_name\`() RETURNS INT\nDETERMINISTIC\nBEGIN\n  RETURN 1;\nEND;\n`;
           onInsertTemplate(node.connId, template);
         },
       });

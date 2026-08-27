@@ -26,6 +26,7 @@ interface Props {
   onDeleteConnection: (configId: string) => void; // #73: 删除保存的连接
   onOpenTable: (connId: number, database: string, table: string) => void;
   onShowDDL: (connId: number, database: string, table: string) => void;
+  onShowObjectDDL: (connId: number, database: string, objectName: string, objectType: string) => void; // 查看视图/函数/存储过程/触发器的 DDL
   onEditStructure: (connId: number, database: string, table: string) => void;
   onInsertTemplate: (connId: number, template: string) => void; // #75: 插入 DDL 模板
 }
@@ -76,6 +77,7 @@ export default function SchemaTree({
   onDeleteConnection,
   onOpenTable,
   onShowDDL,
+  onShowObjectDDL,
   onEditStructure,
   onInsertTemplate,
 }: Props) {
@@ -505,15 +507,31 @@ export default function SchemaTree({
       menuItems.push({ label: t("tree.menu.truncateTable"), action: () => handleTruncateTable(node) });
       menuItems.push({ label: t("tree.menu.dropTable"), action: () => handleDropTable(node) });
     } else if (node.kind === "view") {
+      menuItems.push({
+        label: t("tree.menu.showDDL"),
+        action: () => onShowObjectDDL(node.connId, node.database, node.name, "VIEW"),
+      });
       menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
       menuItems.push({ label: t("tree.menu.dropView"), action: () => handleDropView(node) });
     } else if (node.kind === "function") {
+      menuItems.push({
+        label: t("tree.menu.showDDL"),
+        action: () => onShowObjectDDL(node.connId, node.database, node.name, "FUNCTION"),
+      });
       menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
       menuItems.push({ label: t("tree.menu.dropFunction"), action: () => handleDropFunction(node) });
     } else if (node.kind === "procedure") {
+      menuItems.push({
+        label: t("tree.menu.showDDL"),
+        action: () => onShowObjectDDL(node.connId, node.database, node.name, "PROCEDURE"),
+      });
       menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
       menuItems.push({ label: t("tree.menu.dropProcedure"), action: () => handleDropProcedure(node) });
     } else if (node.kind === "trigger") {
+      menuItems.push({
+        label: t("tree.menu.showDDL"),
+        action: () => onShowObjectDDL(node.connId, node.database, node.name, "TRIGGER"),
+      });
       menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
       menuItems.push({ label: t("tree.menu.dropTrigger"), action: () => handleDropTrigger(node) });
     } else if (node.kind === "tables-group") {

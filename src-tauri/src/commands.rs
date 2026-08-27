@@ -1257,6 +1257,55 @@ pub async fn show_create_table(
 }
 
 #[tauri::command]
+pub async fn show_create_object(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    object_name: String,
+    object_type: String, // "VIEW" | "FUNCTION" | "PROCEDURE" | "TRIGGER"
+) -> Result<String> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
+
+    let driver_id = active.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+    
+    let sql = format!(
+        "SHOW CREATE {} {}",
+        object_type.to_uppercase(),
+        dialect.quote_identifier(&object_name)
+    );
+
+    let output = execute_buffered(
+        active.conn.as_mut(),
+        Some(&database),
+        &sql,
+        &ExecOpts::default(),
+    )
+    .await?;
+
+    // 提取第一个结果集的第一行第二列（Create View/Function/Procedure/Trigger）
+    if let Some(result_set) = output.first_result_set() {
+        if let Some(row) = result_set.rows.first() {
+            if let Some(cell) = row.get(1) {
+                return Ok(cell.to_display_string());
+            }
+        }
+    }
+
+    Err(DbError::Other(format!("No CREATE {} result", object_type)))
+}
+
+#[tauri::command]
 pub async fn get_primary_key(
     state: State<'_, Arc<AppState>>,
     id: u64,

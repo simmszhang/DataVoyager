@@ -67,6 +67,7 @@ pub fn run() {
             commands::build_edit_sql,
             commands::build_insert_sql,
             commands::show_create_table,
+            commands::show_create_object,
             commands::get_primary_key,
             commands::batch_delete_rows,
             commands::batch_insert_rows,

@@ -181,6 +181,16 @@ export default function App() {
     }
   }
 
+  async function handleShowObjectDDL(connId: number, database: string, objectName: string, objectType: string) {
+    try {
+      const ddl = await api.showCreateObject(connId, database, objectName, objectType);
+      updateWorkspace(connId, { query: ddl });
+      setStatus(t("app.status.ddlLoaded"));
+    } catch (e) {
+      setStatus(errToString(e));
+    }
+  }
+
   function handleEditStructure(connId: number, database: string, table: string) {
     setStructureEditor({ connId, database, table });
   }
@@ -617,6 +627,7 @@ export default function App() {
             onDeleteConnection={handleDeleteConnection}
             onOpenTable={handleOpenTable}
             onShowDDL={handleShowDDL}
+            onShowObjectDDL={handleShowObjectDDL}
             onEditStructure={handleEditStructure}
             onInsertTemplate={handleInsertTemplate}
           />

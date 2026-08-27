@@ -548,3 +548,22 @@
      - `src/locales/zh-CN.json` / `en-US.json` - 添加"查看表/视图/函数/存储过程"翻译
 - **优先级**：P2 - 提升用户体验的重要功能
 - **规模**：中型 - 需要修改 SchemaTree 右键菜单、添加多个 DDL 模板、处理编辑器插入逻辑
+
+### #76 视图/函数/存储过程/触发器节点缺少"查看 DDL"菜单 ✅ 已修复
+- **现状**：表节点有"查看 DDL"菜单，但视图/函数/存储过程/触发器节点没有，用户无法快速查看这些对象的创建语句。
+- **影响**：用户体验不一致，需要手动编写 `SHOW CREATE VIEW/FUNCTION/PROCEDURE/TRIGGER` 语句。
+- **方向**：
+  1. 后端添加通用的 `show_create_object` 命令，支持 VIEW/FUNCTION/PROCEDURE/TRIGGER
+  2. 前端在视图/函数/存储过程/触发器节点右键菜单中添加"查看 DDL"选项
+  3. 点击后调用后端 API，将 DDL 插入到编辑器
+- **修复**：
+  - `src-tauri/src/commands.rs:340-372` - 添加 `show_create_object` 命令
+  - `src-tauri/src/lib.rs:70` - 注册新命令
+  - `src/api.ts:73-74` - 添加 `showCreateObject` API
+  - `src/App.tsx:206-213` - 添加 `handleShowObjectDDL` 处理函数
+  - `src/App.tsx:631` - 传递 `onShowObjectDDL` prop
+  - `src/components/SchemaTree.tsx:29` - 添加 `onShowObjectDDL` prop 类型
+  - `src/components/SchemaTree.tsx:81` - 添加 `onShowObjectDDL` 参数
+  - `src/components/SchemaTree.tsx:510-527` - 视图/函数/存储过程/触发器节点添加"查看 DDL"菜单项
+- **优先级**：P2 - 提升用户体验
+- **规模**：小型 - 单个命令 + 前端菜单项添加

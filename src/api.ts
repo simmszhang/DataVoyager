@@ -399,6 +399,8 @@ export const api = {
     invoke<string>("build_insert_sql", { id, table, cells }),
   showCreateTable: (id: number, database: string, table: string) =>
     invoke<string>("show_create_table", { id, database, table }),
+  showCreateObject: (id: number, database: string, objectName: string, objectType: string) =>
+    invoke<string>("show_create_object", { id, database, object_name: objectName, object_type: objectType }),
   getPrimaryKey: (id: number, database: string, table: string) =>
     invoke<string[]>("get_primary_key", { id, database, table }),
   batchDeleteRows: (

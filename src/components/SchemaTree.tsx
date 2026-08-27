@@ -561,7 +561,7 @@ export default function SchemaTree({
       menuItems.push({
         label: t("tree.menu.createFunction"),
         action: () => {
-          const template = `-- 创建函数\nDELIMITER $$\nCREATE FUNCTION \`${node.database}\`.\`function_name\`() RETURNS INT\nBEGIN\n  RETURN 1;\nEND$$\nDELIMITER ;\n`;
+          const template = `-- 创建函数\nCREATE FUNCTION \`${node.database}\`.\`function_name\`() RETURNS INT\nBEGIN\n  RETURN 1;\nEND;\n`;
           onInsertTemplate(node.connId, template);
         },
       });
@@ -570,7 +570,7 @@ export default function SchemaTree({
       menuItems.push({
         label: t("tree.menu.createProcedure"),
         action: () => {
-          const template = `-- 创建存储过程\nDELIMITER $$\nCREATE PROCEDURE \`${node.database}\`.\`procedure_name\`()\nBEGIN\n  SELECT 'Hello';\nEND$$\nDELIMITER ;\n`;
+          const template = `-- 创建存储过程\nCREATE PROCEDURE \`${node.database}\`.\`procedure_name\`()\nBEGIN\n  SELECT 'Hello';\nEND;\n`;
           onInsertTemplate(node.connId, template);
         },
       });

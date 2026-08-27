@@ -1293,16 +1293,55 @@ pub async fn show_create_object(
     )
     .await?;
 
-    // 提取第一个结果集的第一行第二列（Create View/Function/Procedure/Trigger）
+    // 提取第一个结果集的第一行
+    // TABLE/VIEW: 第2列是 DDL
+    // FUNCTION/PROCEDURE: 第3列是 DDL (第2列是 sql_mode)
     if let Some(result_set) = output.first_result_set() {
         if let Some(row) = result_set.rows.first() {
-            if let Some(cell) = row.get(1) {
+            let ddl_column = if object_type.to_uppercase() == "FUNCTION" || object_type.to_uppercase() == "PROCEDURE" {
+                2 // 第3列 (index 2)
+            } else {
+                1 // 第2列 (index 1)
+            };
+            
+            if let Some(cell) = row.get(ddl_column) {
                 return Ok(cell.to_display_string());
             }
         }
     }
 
     Err(DbError::Other(format!("No CREATE {} result", object_type)))
+}
+
+#[tauri::command]
+pub async fn execute_procedure(
+    state: State<'_, Arc<AppState>>,
+    id: u64,
+    database: String,
+    procedure_name: String,
+) -> Result<String> {
+    let entry = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
+
+    let mut active = entry.lock().await;
+    ensure_connected(state.inner(), &mut active).await?;
+
+    let driver_id = active.driver_id.clone();
+    let driver = state.registry.resolve(&driver_id)?;
+    let dialect = driver.dialect();
+    
+    let sql = format!(
+        "CALL {}()",
+        dialect.quote_identifier(&procedure_name)
+    );
+
+    // 插入到编辑器，让用户可以修改参数后执行
+    Ok(sql)
 }
 
 #[tauri::command]

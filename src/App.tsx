@@ -191,6 +191,16 @@ export default function App() {
     }
   }
 
+  async function handleExecuteProcedure(connId: number, database: string, procedureName: string) {
+    try {
+      const sql = await api.executeProcedure(connId, database, procedureName);
+      updateWorkspace(connId, { query: sql });
+      setStatus(t("app.status.procedureCallInserted"));
+    } catch (e) {
+      setStatus(errToString(e));
+    }
+  }
+
   function handleEditStructure(connId: number, database: string, table: string) {
     setStructureEditor({ connId, database, table });
   }
@@ -628,6 +638,7 @@ export default function App() {
             onOpenTable={handleOpenTable}
             onShowDDL={handleShowDDL}
             onShowObjectDDL={handleShowObjectDDL}
+            onExecuteProcedure={handleExecuteProcedure}
             onEditStructure={handleEditStructure}
             onInsertTemplate={handleInsertTemplate}
           />

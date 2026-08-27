@@ -27,6 +27,7 @@ interface Props {
   onOpenTable: (connId: number, database: string, table: string) => void;
   onShowDDL: (connId: number, database: string, table: string) => void;
   onShowObjectDDL: (connId: number, database: string, objectName: string, objectType: string) => void; // 查看视图/函数/存储过程/触发器的 DDL
+  onExecuteProcedure: (connId: number, database: string, procedureName: string) => void; // 执行存储过程
   onEditStructure: (connId: number, database: string, table: string) => void;
   onInsertTemplate: (connId: number, template: string) => void; // #75: 插入 DDL 模板
 }
@@ -78,6 +79,7 @@ export default function SchemaTree({
   onOpenTable,
   onShowDDL,
   onShowObjectDDL,
+  onExecuteProcedure,
   onEditStructure,
   onInsertTemplate,
 }: Props) {
@@ -524,6 +526,10 @@ export default function SchemaTree({
       menuItems.push({
         label: t("tree.menu.showDDL"),
         action: () => onShowObjectDDL(node.connId, node.database, node.name, "PROCEDURE"),
+      });
+      menuItems.push({
+        label: t("tree.menu.executeProcedure"),
+        action: () => onExecuteProcedure(node.connId, node.database, node.name),
       });
       menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
       menuItems.push({ label: t("tree.menu.dropProcedure"), action: () => handleDropProcedure(node) });

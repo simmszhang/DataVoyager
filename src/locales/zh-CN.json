@@ -22,7 +22,8 @@
       "inTransaction": "● 事务中",
       "counts": "{{drivers}} 个驱动 · {{projects}} 个项目 · {{connections}} 个连接",
       "connectionDeleted": "连接已删除",
-      "templateInserted": "模板已插入"
+      "templateInserted": "模板已插入",
+      "procedureCallInserted": "存储过程调用已插入到编辑器"
     },
     "action": {
       "newConnection": "+ 新建连接",
@@ -144,6 +145,7 @@
       "dropView": "删除视图",
       "dropFunction": "删除函数",
       "dropProcedure": "删除存储过程",
+      "executeProcedure": "执行",
       "dropTrigger": "删除触发器",
       "copyColumnName": "复制列名",
       "copyColumnDef": "复制列定义"

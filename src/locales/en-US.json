@@ -22,7 +22,8 @@
       "inTransaction": "● In transaction",
       "counts": "{{drivers}} drivers · {{projects}} projects · {{connections}} connections",
       "connectionDeleted": "Connection deleted",
-      "templateInserted": "Template inserted"
+      "templateInserted": "Template inserted",
+      "procedureCallInserted": "Procedure call inserted into editor"
     },
     "action": {
       "newConnection": "+ New Connection",
@@ -144,6 +145,7 @@
       "dropView": "Drop View",
       "dropFunction": "Drop Function",
       "dropProcedure": "Drop Procedure",
+      "executeProcedure": "Execute",
       "dropTrigger": "Drop Trigger",
       "copyColumnName": "Copy Column Name",
       "copyColumnDef": "Copy Column Definition"

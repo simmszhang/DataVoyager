@@ -420,10 +420,35 @@ pub async fn reconnect(
     }
     .ok_or_else(|| DbError::Config("连接配置不存在".to_string()))?;
 
+    // Retrieve secrets from keyring, logging errors for diagnostics (#72)
+    let password = match get_secret(&secret_key(&config_id, SecretKind::MysqlPassword)) {
+        Ok(pw) => Some(pw),
+        Err(e) => {
+            log::warn!("Failed to read MySQL password from keyring for {}: {}", config_id, e);
+            None
+        }
+    };
+    
+    let ssh_password = match get_secret(&secret_key(&config_id, SecretKind::SshPassword)) {
+        Ok(pw) => Some(pw),
+        Err(e) => {
+            log::warn!("Failed to read SSH password from keyring for {}: {}", config_id, e);
+            None
+        }
+    };
+    
+    let ssh_private_key = match get_secret(&secret_key(&config_id, SecretKind::SshPrivateKey)) {
+        Ok(key) => Some(key),
+        Err(e) => {
+            log::warn!("Failed to read SSH private key from keyring for {}: {}", config_id, e);
+            None
+        }
+    };
+
     let secrets = SshSecrets {
-        password: get_secret(&secret_key(&config_id, SecretKind::MysqlPassword)).ok(),
-        ssh_password: get_secret(&secret_key(&config_id, SecretKind::SshPassword)).ok(),
-        ssh_private_key: get_secret(&secret_key(&config_id, SecretKind::SshPrivateKey)).ok(),
+        password,
+        ssh_password,
+        ssh_private_key,
     };
 
     // 缺 secret 判定：SSH 启用但 keyring 无任何 SSH 凭据 → 报错，引导前端走 connect 补录。
@@ -1410,7 +1435,7 @@ pub async fn get_table_structure(
     let mut columns = Vec::new();
     if let Some(result_set) = output.first_result_set() {
         for row in &result_set.rows {
-            let name = row.get(0).map(|v| v.to_display_string()).unwrap_or_default();
+            let name = row.first().map(|v| v.to_display_string()).unwrap_or_default();
             let type_name = row.get(1).map(|v| v.to_display_string()).unwrap_or_default();
             let nullable = row
                 .get(3)
@@ -1447,6 +1472,7 @@ pub async fn get_table_structure(
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)]
 pub enum AlterTableOp {
     AddColumn {
         name: String,

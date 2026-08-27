@@ -7,6 +7,10 @@ import CreateTableDialog from "./CreateTableDialog";
 type MenuNode =
   | { kind: "connection"; connId: number }
   | { kind: "database"; connId: number; name: string }
+  | { kind: "tables-group"; connId: number; database: string }
+  | { kind: "views-group"; connId: number; database: string }
+  | { kind: "functions-group"; connId: number; database: string }
+  | { kind: "procedures-group"; connId: number; database: string }
   | { kind: "table"; connId: number; database: string; name: string }
   | { kind: "view"; connId: number; database: string; name: string }
   | { kind: "function"; connId: number; database: string; name: string }
@@ -19,9 +23,11 @@ interface Props {
   onSelectConnection: (id: number) => void;
   onDisconnect: (id: number) => void;
   onReconnect: (configId: string) => void; // R11: 重连已保存的连接
+  onDeleteConnection: (configId: string) => void; // #73: 删除保存的连接
   onOpenTable: (connId: number, database: string, table: string) => void;
   onShowDDL: (connId: number, database: string, table: string) => void;
   onEditStructure: (connId: number, database: string, table: string) => void;
+  onInsertTemplate: (connId: number, template: string) => void; // #75: 插入 DDL 模板
 }
 
 /// 结构化节点 key：JSON 编码，避免 `:` 拼接/切分在库表名含分隔符时失效（defect #3）。
@@ -67,9 +73,11 @@ export default function SchemaTree({
   onSelectConnection,
   onDisconnect,
   onReconnect,
+  onDeleteConnection,
   onOpenTable,
   onShowDDL,
   onEditStructure,
+  onInsertTemplate,
 }: Props) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -250,6 +258,7 @@ export default function SchemaTree({
               className="tree-node"
               style={{ paddingLeft: 40 }}
               onClick={() => toggle(tablesGk)}
+              onContextMenu={(e) => openMenu(e, { kind: "tables-group", connId: c.id, database: db })}
             >
               <span className="tree-caret">{tablesGExpanded ? "▾" : "▸"}</span>
               <span className="tree-icon">📁</span>
@@ -305,6 +314,7 @@ export default function SchemaTree({
               className="tree-node"
               style={{ paddingLeft: 40 }}
               onClick={() => toggle(viewsGk)}
+              onContextMenu={(e) => openMenu(e, { kind: "views-group", connId: c.id, database: db })}
             >
               <span className="tree-caret">{viewsGExpanded ? "▾" : "▸"}</span>
               <span className="tree-icon">📁</span>
@@ -339,6 +349,7 @@ export default function SchemaTree({
               className="tree-node"
               style={{ paddingLeft: 40 }}
               onClick={() => toggle(functionsGk)}
+              onContextMenu={(e) => openMenu(e, { kind: "functions-group", connId: c.id, database: db })}
             >
               <span className="tree-caret">{functionsGExpanded ? "▾" : "▸"}</span>
               <span className="tree-icon">📁</span>
@@ -373,6 +384,7 @@ export default function SchemaTree({
               className="tree-node"
               style={{ paddingLeft: 40 }}
               onClick={() => toggle(proceduresGk)}
+              onContextMenu={(e) => openMenu(e, { kind: "procedures-group", connId: c.id, database: db })}
             >
               <span className="tree-caret">{proceduresGExpanded ? "▾" : "▸"}</span>
               <span className="tree-icon">📁</span>
@@ -451,10 +463,28 @@ export default function SchemaTree({
         // 未连接但有 config_id：显示"打开连接"
         menuItems.push({ label: t("tree.menu.reconnect"), action: () => onReconnect(conn.config_id!) });
       }
+      
+      // #73: 如果有 config_id，添加"删除连接"选项
+      if (conn?.config_id) {
+        menuItems.push({ label: t("tree.menu.deleteConnection"), action: () => onDeleteConnection(conn.config_id!) });
+      }
     } else if (node.kind === "database") {
+      // #75: 数据库节点 - 展开各个分组
       menuItems.push({
-        label: t("tree.menu.createTable"),
-        action: () => setCreateTable({ connId: node.connId, database: node.name }),
+        label: t("tree.menu.viewTables"),
+        action: () => toggle(tablesGroupKey(node.connId, node.name)),
+      });
+      menuItems.push({
+        label: t("tree.menu.viewViews"),
+        action: () => toggle(viewsGroupKey(node.connId, node.name)),
+      });
+      menuItems.push({
+        label: t("tree.menu.viewFunctions"),
+        action: () => toggle(functionsGroupKey(node.connId, node.name)),
+      });
+      menuItems.push({
+        label: t("tree.menu.viewProcedures"),
+        action: () => toggle(proceduresGroupKey(node.connId, node.name)),
       });
       menuItems.push({ label: t("tree.menu.dropDatabase"), action: () => handleDropDatabase(node) });
     } else if (node.kind === "table") {
@@ -486,6 +516,46 @@ export default function SchemaTree({
     } else if (node.kind === "trigger") {
       menuItems.push({ label: t("tree.menu.copyName"), action: () => copyToClipboard(node.name) });
       menuItems.push({ label: t("tree.menu.dropTrigger"), action: () => handleDropTrigger(node) });
+    } else if (node.kind === "tables-group") {
+      // #75: 表分组 - 新建表（可视化对话框）+ 创建表 (SQL)
+      menuItems.push({
+        label: t("tree.menu.createTable"),
+        action: () => setCreateTable({ connId: node.connId, database: node.database }),
+      });
+      menuItems.push({
+        label: t("tree.menu.createTableSQL"),
+        action: () => {
+          const template = `-- 创建表\nCREATE TABLE \`${node.database}\`.\`table_name\` (\n  \`id\` INT PRIMARY KEY AUTO_INCREMENT,\n  \`name\` VARCHAR(255) NOT NULL,\n  \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);\n`;
+          onInsertTemplate(node.connId, template);
+        },
+      });
+    } else if (node.kind === "views-group") {
+      // #75: 视图分组 - 创建视图
+      menuItems.push({
+        label: t("tree.menu.createView"),
+        action: () => {
+          const template = `-- 创建视图\nCREATE VIEW \`${node.database}\`.\`view_name\` AS\nSELECT * FROM \`${node.database}\`.\`table_name\`;\n`;
+          onInsertTemplate(node.connId, template);
+        },
+      });
+    } else if (node.kind === "functions-group") {
+      // #75: 函数分组 - 创建函数
+      menuItems.push({
+        label: t("tree.menu.createFunction"),
+        action: () => {
+          const template = `-- 创建函数\nDELIMITER $$\nCREATE FUNCTION \`${node.database}\`.\`function_name\`() RETURNS INT\nBEGIN\n  RETURN 1;\nEND$$\nDELIMITER ;\n`;
+          onInsertTemplate(node.connId, template);
+        },
+      });
+    } else if (node.kind === "procedures-group") {
+      // #75: 存储过程分组 - 创建存储过程
+      menuItems.push({
+        label: t("tree.menu.createProcedure"),
+        action: () => {
+          const template = `-- 创建存储过程\nDELIMITER $$\nCREATE PROCEDURE \`${node.database}\`.\`procedure_name\`()\nBEGIN\n  SELECT 'Hello';\nEND$$\nDELIMITER ;\n`;
+          onInsertTemplate(node.connId, template);
+        },
+      });
     }
   }
 

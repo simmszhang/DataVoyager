@@ -20,7 +20,9 @@
       "ready": "就绪",
       "notConnected": "未连接",
       "inTransaction": "● 事务中",
-      "counts": "{{drivers}} 个驱动 · {{projects}} 个项目 · {{connections}} 个连接"
+      "counts": "{{drivers}} 个驱动 · {{projects}} 个项目 · {{connections}} 个连接",
+      "connectionDeleted": "连接已删除",
+      "templateInserted": "模板已插入"
     },
     "action": {
       "newConnection": "+ 新建连接",
@@ -62,7 +64,8 @@
       "renameProject": "新名称"
     },
     "confirm": {
-      "deleteProject": "删除该项目？项目下连接需先删除。"
+      "deleteProject": "删除该项目？项目下连接需先删除。",
+      "deleteConnection": "确定删除该连接？此操作不可撤销。"
     }
   },
   "connection": {
@@ -119,7 +122,16 @@
     "menu": {
       "disconnect": "断开连接",
       "reconnect": "打开连接",
+      "deleteConnection": "删除连接",
       "createTable": "新建表",
+      "createTableSQL": "创建表 (SQL)",
+      "createView": "创建视图",
+      "createFunction": "创建函数",
+      "createProcedure": "创建存储过程",
+      "viewTables": "查看表",
+      "viewViews": "查看视图",
+      "viewFunctions": "查看函数",
+      "viewProcedures": "查看存储过程",
       "dropDatabase": "删除数据库",
       "queryData": "查询数据",
       "showDDL": "查看 DDL",

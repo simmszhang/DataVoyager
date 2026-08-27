@@ -145,7 +145,9 @@ impl Connection for MysqlConnection {
 
     async fn tables(&mut self, schema: &str) -> Result<Vec<TableInfo>> {
         let sql = "SELECT TABLE_NAME, TABLE_TYPE, TABLE_COMMENT \
-                   FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME";
+                   FROM information_schema.TABLES \
+                   WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' \
+                   ORDER BY TABLE_NAME";
         let rows: Vec<Row> = self
             .conn
             .as_mut()

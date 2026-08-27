@@ -20,7 +20,9 @@
       "ready": "Ready",
       "notConnected": "Not connected",
       "inTransaction": "● In transaction",
-      "counts": "{{drivers}} drivers · {{projects}} projects · {{connections}} connections"
+      "counts": "{{drivers}} drivers · {{projects}} projects · {{connections}} connections",
+      "connectionDeleted": "Connection deleted",
+      "templateInserted": "Template inserted"
     },
     "action": {
       "newConnection": "+ New Connection",
@@ -62,7 +64,8 @@
       "renameProject": "New name"
     },
     "confirm": {
-      "deleteProject": "Delete this project? Connections under it must be deleted first."
+      "deleteProject": "Delete this project? Connections under it must be deleted first.",
+      "deleteConnection": "Delete this connection? This cannot be undone."
     }
   },
   "connection": {
@@ -119,7 +122,16 @@
     "menu": {
       "disconnect": "Disconnect",
       "reconnect": "Connect",
+      "deleteConnection": "Delete Connection",
       "createTable": "New Table",
+      "createTableSQL": "Create Table (SQL)",
+      "createView": "Create View",
+      "createFunction": "Create Function",
+      "createProcedure": "Create Procedure",
+      "viewTables": "View Tables",
+      "viewViews": "View Views",
+      "viewFunctions": "View Functions",
+      "viewProcedures": "View Procedures",
       "dropDatabase": "Drop Database",
       "queryData": "Query Data",
       "showDDL": "Show DDL",

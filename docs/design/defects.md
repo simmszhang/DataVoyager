@@ -83,6 +83,12 @@
 | #58 | `config.json` 非原子写 | P2 | 小 |
 | #63 | 连接配置无更新命令 / `color` 死字段 | P2 | 小 |
 | #66 | SchemaTree 缓存无失效 | P2 | 小 |
+| #70 | 视图同时出现在表和视图节点下 | P2 | 小 |
+| #71 | 切换项目后保存的连接不显示（R11 未完全实现） | P1 | 中 |
+| #72 | reconnect 静默吞没 keyring 错误导致密码丢失 | P1 | 小 |
+| #73 | 保存的连接无法删除（R11 UI 缺失） | P2 | 小 |
+| #74 | 双击占位符连接（未激活的保存连接）报错 | P2 | 小 |
+| #75 | Schema 树缺少创建表/视图/函数/存储过程的右键菜单 | P2 | 中 |
 | #10 | 结果网格列宽固定 | P3 | 小 |
 | #15 | workspace 残留未用字段 | P3 | 小 |
 | #16 | 切换项目丢失活动连接 | P3 | 小 |
@@ -473,3 +479,72 @@
 ### #69 编辑控件类型覆盖不足（补充 #11）
 - **现状**：`toCellValue` 只产出 null/i64/f64/str，decimal/date/json/bytes/u64 一律字符串化或丢精度。
 - **方向**：提交时携带列类型，由类型映射层解析。
+
+### #70 视图同时出现在表和视图节点下 ✅ 已修复
+- **现状**：`tables()` 查询 `information_schema.TABLES` 未过滤 `TABLE_TYPE`，返回包含视图（`TABLE_TYPE='VIEW'`）。
+- **影响**：Schema 树中视图同时出现在「表」和「视图」两个分组下，导致 UI 混乱。
+- **方向**：`tables()` 添加 `TABLE_TYPE = 'BASE TABLE'` 过滤条件，仅返回真实表。
+
+### #71 切换项目后保存的连接不显示（R11 未完全实现） ✅ 已修复
+- **现状**：前端从未调用 `listSavedConnections`，SchemaTree 仅显示 `listConnections()` 返回的活动连接；切换项目后，新项目的保存连接不可见。
+- **影响**：用户切换项目后看到空白连接列表，无法重连已保存的连接，违背 R11「断开不删除、可复用」的设计目标。
+- **方向**：App.tsx 启动时和切换项目时调用 `listSavedConnections(projectId)`，合并活动连接与保存连接展示；SchemaTree 根据 `config_id` 显示「打开连接」或「关闭连接」菜单。
+
+### #72 reconnect 静默吞没 keyring 错误导致密码丢失 / Windows keyring v3 bug ✅ 已修复
+- **现状**：
+  1. `reconnect` 中 `get_secret(...).ok()` 静默吞没所有 keyring 错误
+  2. **根本原因**：`keyring 3.6.3` 在 Windows 上存在严重 bug：用同一个 `Entry` 实例可以读回密码，但用新的 `Entry` 实例读取返回 `NoEntry`
+- **影响**：Windows 用户重连时密码总是丢失，得到 "using password: NO" 认证错误；`connect` 写入密码成功，但 `reconnect` 创建新 `Entry` 实例读取时失败。
+- **方向**：升级到 `keyring = "4"` 修复 Windows 上的读取 bug；增加错误日志便于排障。
+- **证据**：`src-tauri/tests/keyring_test.rs:test_keyring_roundtrip` 在 Windows 上复现问题。
+- **修复**：升级到 `keyring 4.1.6`，测试确认新 Entry 实例可以正确读取密码。
+
+### #73 保存的连接无法删除（R11 UI 缺失）✅ 已修复
+- **现状**：后端有 `delete_saved_connection` 命令，前端 API 也有 `deleteSavedConnection` 方法，但 SchemaTree 连接节点的右键菜单没有"删除连接"选项。
+- **影响**：用户无法删除不需要的保存连接，连接列表越来越长；唯一删除方式是手动编辑 config.json。
+- **方向**：在 SchemaTree 连接节点右键菜单中添加"删除连接"选项（仅对有 `config_id` 的保存连接显示）；调用 `deleteSavedConnection` 并刷新连接列表。
+- **修复**：
+  1. `src/App.tsx:467-483` - 添加 `handleDeleteConnection` 函数，删除后刷新保存的连接列表
+  2. `src/App.tsx:607` - 传递 `onDeleteConnection` prop 给 SchemaTree
+  3. `src/components/SchemaTree.tsx:21+71` - 添加 `onDeleteConnection` prop
+  4. `src/components/SchemaTree.tsx:456-458` - 在右键菜单中添加"删除连接"选项（仅对有 config_id 的连接显示）
+  5. `src/locales/zh-CN.json` / `src/locales/en-US.json` - 添加翻译（`tree.menu.deleteConnection`、`app.confirm.deleteConnection`、`app.status.connectionDeleted`）
+
+### #74 双击占位符连接（未激活的保存连接）报错 ✅ 已修复
+- **现状**：#71 修复引入的回归。占位符连接使用 `id = -1` 表示未激活的保存连接，双击时 `handleSelectConnection` 尝试 `openConnection(-1)`，导致后端 API 调用失败："invalid value: integer `-1`, expected u64"。
+- **影响**：用户双击未激活的保存连接时报错，只能通过右键菜单重连。
+- **方向**：`handleSelectConnection` 检查 `id === -1`，自动调用 `handleReconnect(config_id)` 而不是 `openConnection`。
+- **修复**：`src/App.tsx:144-155` - 在 `handleSelectConnection` 中检测占位符 ID，从 `displayConnections` 找到 `config_id` 并调用 `handleReconnect`。
+
+### #75 Schema 树缺少创建表/视图/函数/存储过程的右键菜单 ✅ 已修复
+- **现状**：Schema 树的数据库节点、表节点、视图节点等缺少"创建"相关的右键菜单项。用户只能手动编写 DDL 语句。
+- **影响**：用户体验不友好，需要记忆 DDL 语法；无法快速创建新对象；缺少类似 Navicat/DBeaver 的常见功能。
+- **期望功能**：
+  - **数据库节点**右键菜单：创建表、创建视图、创建函数、创建存储过程
+  - **表节点**右键菜单：创建表（新建空表）
+  - **视图节点**右键菜单：创建视图
+  - **函数节点**右键菜单：创建函数
+  - **存储过程节点**右键菜单：创建存储过程
+- **修复**：
+  1. **数据库节点**右键菜单改为"查看表/视图/函数/存储过程"（展开对应分组）
+  2. **表分组节点**右键菜单：添加"新建表"（可视化对话框）+ "创建表 (SQL)"
+  3. **视图/函数/存储过程分组节点**：保持"创建..."菜单
+  4. 菜单项点击后插入对应的 DDL 模板到编辑器（包含数据库名和占位符）
+  5. 模板内容：
+     - 表：`CREATE TABLE \`db\`.\`table_name\` (...)`
+     - 视图：`CREATE VIEW \`db\`.\`view_name\` AS SELECT ...`
+     - 函数：`DELIMITER $$ CREATE FUNCTION \`db\`.\`function_name\`() ...`
+     - 存储过程：`DELIMITER $$ CREATE PROCEDURE \`db\`.\`procedure_name\`() ...`
+  6. 文件改动：
+     - `src/App.tsx:188-192` - 添加 `handleInsertTemplate` 函数
+     - `src/App.tsx:622` - 传递 `onInsertTemplate` prop
+     - `src/components/SchemaTree.tsx:27` - 添加 `onInsertTemplate` prop 类型
+     - `src/components/SchemaTree.tsx:7-17` - 扩展 MenuNode 类型添加分组节点
+     - `src/components/SchemaTree.tsx:80` - 添加 `onInsertTemplate` 参数
+     - `src/components/SchemaTree.tsx:261/317/351/387` - 各分组节点添加 `onContextMenu` 处理
+     - `src/components/SchemaTree.tsx:471-489` - 数据库节点改为"查看..."菜单
+     - `src/components/SchemaTree.tsx:520-531` - 表分组节点添加"新建表"（对话框）+"创建表 (SQL)"
+     - `src/components/SchemaTree.tsx:532-567` - 视图/函数/存储过程分组的"创建..."菜单和 DDL 模板生成逻辑
+     - `src/locales/zh-CN.json` / `en-US.json` - 添加"查看表/视图/函数/存储过程"翻译
+- **优先级**：P2 - 提升用户体验的重要功能
+- **规模**：中型 - 需要修改 SchemaTree 右键菜单、添加多个 DDL 模板、处理编辑器插入逻辑

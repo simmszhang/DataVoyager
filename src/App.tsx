@@ -6,6 +6,7 @@ import {
   displayCell,
   DriverInfo,
   EditCell,
+  SavedConnection,
   StreamEvent,
   UNKNOWN_COLUMN_TYPE,
 } from "./api";
@@ -41,6 +42,7 @@ export default function App() {
   const { t } = useTranslation();
 
   const [drivers, setDrivers] = useState<DriverInfo[]>([]);
+  const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
   const [showDialog, setShowDialog] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -65,6 +67,25 @@ export default function App() {
 
   const activeConn = connections.find((c) => c.id === activeId) ?? null;
   const visibleConnections = connections.filter((c) => c.project_id === projectId);
+  
+  // Merge active connections with saved connections for display (#71)
+  // Saved connections without matching active connection are shown as disconnected
+  const displayConnections = [
+    ...visibleConnections,
+    ...savedConnections
+      .filter((saved) => saved.project_id === projectId)
+      .filter((saved) => !visibleConnections.some((active) => active.config_id === saved.id))
+      .map((saved) => ({
+        id: -1, // Placeholder ID for disconnected saved connections
+        name: saved.name,
+        driver_id: saved.driver,
+        project_id: saved.project_id,
+        database: saved.database || "",
+        server_version: "",
+        config_id: saved.id,
+      })),
+  ];
+  
   const ws = activeId != null ? workspaces[activeId] : undefined;
 
   useEffect(() => {
@@ -73,11 +94,26 @@ export default function App() {
       .listProjects()
       .then((ps) => {
         setProjects(ps);
-        if (ps.length > 0) setProjectId(ps[0].id);
+        if (ps.length > 0) {
+          setProjectId(ps[0].id);
+          loadSavedConnections(ps[0].id);
+        }
       })
       .catch(() => {});
+    // Also load active connections on mount (#53)
+    api.listConnections().then(setConnections).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Load saved connections for a project (#71)
+  async function loadSavedConnections(projectId: string) {
+    try {
+      const saved = await api.listSavedConnections(projectId);
+      setSavedConnections(saved);
+    } catch (e) {
+      console.error("Failed to load saved connections:", e);
+    }
+  }
 
   /// 连接成功后：刷新连接列表 + 打开标签。
   async function finishConnect() {
@@ -89,6 +125,10 @@ export default function App() {
     setStatus(t("app.status.connected", { name: newest.name, version: newest.server_version }));
     if (newest.database) {
       updateWorkspace(newest.id, { selectedDb: newest.database });
+    }
+    // Reload saved connections after new connection (#71)
+    if (projectId) {
+      loadSavedConnections(projectId);
     }
   }
 
@@ -102,6 +142,15 @@ export default function App() {
   }
 
   function handleSelectConnection(id: number) {
+    // #74: 占位符连接（id === -1）是未激活的保存连接，需要重连
+    if (id === -1) {
+      // 从 displayConnections 中找到对应的保存连接并重连
+      const savedConn = displayConnections.find((c) => c.id === id);
+      if (savedConn?.config_id) {
+        handleReconnect(savedConn.config_id);
+      }
+      return;
+    }
     const conn = connections.find((c) => c.id === id);
     if (conn) openConnection(conn);
   }
@@ -134,6 +183,12 @@ export default function App() {
 
   function handleEditStructure(connId: number, database: string, table: string) {
     setStructureEditor({ connId, database, table });
+  }
+
+  // #75: 插入 DDL 模板到编辑器
+  function handleInsertTemplate(connId: number, template: string) {
+    updateWorkspace(connId, { query: template });
+    setStatus(t("app.status.templateInserted"));
   }
 
   async function runQuery(id: number, sql: string, confirmed: boolean = false) {
@@ -388,6 +443,7 @@ export default function App() {
   function handleSwitchProject(id: string) {
     setProjectId(id);
     setActive(null);
+    loadSavedConnections(id); // Load saved connections for the new project (#71)
   }
 
   async function handleDisconnect(id: number) {
@@ -396,6 +452,10 @@ export default function App() {
       setConnections(connections.filter((c) => c.id !== id));
       closeConnection(id);
       setStatus(null);
+      // Reload saved connections after disconnect to show the saved config (#71)
+      if (projectId) {
+        loadSavedConnections(projectId);
+      }
     } catch (e) {
       setStatus(errToString(e));
     }
@@ -414,6 +474,23 @@ export default function App() {
         if (resp.database) {
           updateWorkspace(resp.id, { selectedDb: resp.database });
         }
+      }
+    } catch (e) {
+      setStatus(errToString(e));
+    }
+  }
+
+  // #73: 删除保存的连接
+  async function handleDeleteConnection(configId: string) {
+    if (!window.confirm(t("app.confirm.deleteConnection"))) {
+      return;
+    }
+    try {
+      await api.deleteSavedConnection(configId);
+      setStatus(t("app.status.connectionDeleted"));
+      // Reload saved connections list
+      if (projectId) {
+        loadSavedConnections(projectId);
       }
     } catch (e) {
       setStatus(errToString(e));
@@ -532,14 +609,16 @@ export default function App() {
             </button>
           </div>
           <SchemaTree
-            connections={visibleConnections}
+            connections={displayConnections}
             activeId={activeId}
             onSelectConnection={handleSelectConnection}
             onDisconnect={handleDisconnect}
             onReconnect={handleReconnect}
+            onDeleteConnection={handleDeleteConnection}
             onOpenTable={handleOpenTable}
             onShowDDL={handleShowDDL}
             onEditStructure={handleEditStructure}
+            onInsertTemplate={handleInsertTemplate}
           />
         </aside>
 

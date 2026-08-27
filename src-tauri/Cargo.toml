@@ -21,7 +21,7 @@ serde.workspace = true
 chrono.workspace = true
 tokio = { version = "1", features = ["sync"] }
 futures = "0.3"
-keyring = "3"
+keyring = "4"
 log = "0.4"
 uuid.workspace = true
 dby-core = { path = "../crates/dby-core" }

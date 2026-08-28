@@ -163,8 +163,9 @@ export default function App() {
       selectedTable: table,
     });
     try {
-      const sql = await api.buildTableSelect(connId, table);
+      const sql = await api.buildTableSelect(connId, database, table);
       updateWorkspace(connId, { query: sql });
+      setStatus(t("app.status.queryInserted"));
     } catch (e) {
       updateWorkspace(connId, { error: errToString(e) });
       setStatus(t("app.status.tableSqlFailed"));
@@ -173,9 +174,9 @@ export default function App() {
 
   async function handleShowDDL(connId: number, database: string, table: string) {
     try {
-      const ddl = await api.showCreateTable(connId, database, table);
-      updateWorkspace(connId, { query: ddl });
-      setStatus(t("app.status.ddlLoaded"));
+      const sql = await api.showCreateTable(connId, database, table);
+      updateWorkspace(connId, { query: sql });
+      setStatus(t("app.status.ddlQueryInserted"));
     } catch (e) {
       setStatus(errToString(e));
     }
@@ -183,9 +184,9 @@ export default function App() {
 
   async function handleShowObjectDDL(connId: number, database: string, objectName: string, objectType: string) {
     try {
-      const ddl = await api.showCreateObject(connId, database, objectName, objectType);
-      updateWorkspace(connId, { query: ddl });
-      setStatus(t("app.status.ddlLoaded"));
+      const sql = await api.showCreateObject(connId, database, objectName, objectType);
+      updateWorkspace(connId, { query: sql });
+      setStatus(t("app.status.ddlQueryInserted"));
     } catch (e) {
       setStatus(errToString(e));
     }

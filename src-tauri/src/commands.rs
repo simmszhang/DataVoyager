@@ -692,6 +692,7 @@ pub async fn list_triggers(
 pub async fn build_table_select(
     state: State<'_, Arc<AppState>>,
     id: u64,
+    database: String,
     table: String,
 ) -> Result<String> {
     let entry = state
@@ -703,11 +704,21 @@ pub async fn build_table_select(
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
     let active = entry.lock().await; // 只读 driver_id
     let driver = state.registry.resolve(&active.driver_id)?;
-    Ok(dby_core::query::build_table_select(
-        driver.dialect(),
-        &table,
-        Some(100),
-    ))
+    let dialect = driver.dialect();
+    
+    // 生成带数据库名的 SELECT 语句
+    let full_table = format!(
+        "{}.{}",
+        dialect.quote_identifier(&database),
+        dialect.quote_identifier(&table)
+    );
+    
+    let sql = format!(
+        "SELECT * FROM {} LIMIT 1000;",
+        full_table
+    );
+    
+    Ok(sql)
 }
 
 #[tauri::command]
@@ -1227,33 +1238,19 @@ pub async fn show_create_table(
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
 
-    let mut active = entry.lock().await;
-    ensure_connected(state.inner(), &mut active).await?;
-
+    let active = entry.lock().await;
     let driver_id = active.driver_id.clone();
     let driver = state.registry.resolve(&driver_id)?;
     let dialect = driver.dialect();
     
-    let sql = format!("SHOW CREATE TABLE {}", dialect.quote_identifier(&table));
+    // 只生成 SQL 语句，不执行
+    let sql = format!(
+        "SHOW CREATE TABLE {}.{};",
+        dialect.quote_identifier(&database),
+        dialect.quote_identifier(&table)
+    );
 
-    let output = execute_buffered(
-        active.conn.as_mut(),
-        Some(&database),
-        &sql,
-        &ExecOpts::default(),
-    )
-    .await?;
-
-    // 提取第一个结果集的第一行第二列（Create Table）
-    if let Some(result_set) = output.first_result_set() {
-        if let Some(row) = result_set.rows.first() {
-            if let Some(cell) = row.get(1) {
-                return Ok(cell.to_display_string());
-            }
-        }
-    }
-
-    Err(DbError::Other("No CREATE TABLE result".into()))
+    Ok(sql)
 }
 
 /// 简单的 SQL 格式化：在主要关键字后添加换行和缩进
@@ -1304,51 +1301,21 @@ pub async fn show_create_object(
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
 
-    let mut active = entry.lock().await;
-    ensure_connected(state.inner(), &mut active).await?;
-
+    let active = entry.lock().await;
     let driver_id = active.driver_id.clone();
     let driver = state.registry.resolve(&driver_id)?;
     let dialect = driver.dialect();
     
+    // 只生成 SQL 语句，不执行
     let sql = format!(
-        "SHOW CREATE {} {}",
+        "SHOW CREATE {} {}.{};",
         object_type.to_uppercase(),
+        dialect.quote_identifier(&database),
         dialect.quote_identifier(&object_name)
     );
 
-    let output = execute_buffered(
-        active.conn.as_mut(),
-        Some(&database),
-        &sql,
-        &ExecOpts::default(),
-    )
-    .await?;
-
-    // 提取第一个结果集的第一行
-    // TABLE/VIEW: 第2列是 DDL
-    // FUNCTION/PROCEDURE/TRIGGER: 第3列是 DDL (第2列是 sql_mode)
-    if let Some(result_set) = output.first_result_set() {
-        if let Some(row) = result_set.rows.first() {
-            let object_type_upper = object_type.to_uppercase();
-            let ddl_column = if object_type_upper == "FUNCTION" 
-                || object_type_upper == "PROCEDURE" 
-                || object_type_upper == "TRIGGER" {
-                2 // 第3列 (index 2)
-            } else {
-                1 // 第2列 (index 1)
-            };
-            
-            if let Some(cell) = row.get(ddl_column) {
-                let ddl = cell.to_display_string();
-                // 简单格式化：在关键字后添加换行
-                let formatted = format_sql(&ddl);
-                return Ok(formatted);
-            }
-        }
-    }
-
-    Err(DbError::Other(format!("No CREATE {} result", object_type)))
+    Ok(sql)
+}
 }
 
 #[tauri::command]
@@ -1366,19 +1333,18 @@ pub async fn execute_procedure(
         .cloned()
         .ok_or_else(|| DbError::ConnectionNotFound(id.to_string()))?;
 
-    let mut active = entry.lock().await;
-    ensure_connected(state.inner(), &mut active).await?;
-
+    let active = entry.lock().await;
     let driver_id = active.driver_id.clone();
     let driver = state.registry.resolve(&driver_id)?;
     let dialect = driver.dialect();
     
+    // 生成 CALL 语句，让用户可以修改参数后执行
     let sql = format!(
-        "CALL {}()",
+        "CALL {}.{}();",
+        dialect.quote_identifier(&database),
         dialect.quote_identifier(&procedure_name)
     );
 
-    // 插入到编辑器，让用户可以修改参数后执行
     Ok(sql)
 }
 

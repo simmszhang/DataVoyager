@@ -23,7 +23,9 @@
       "counts": "{{drivers}} drivers · {{projects}} projects · {{connections}} connections",
       "connectionDeleted": "Connection deleted",
       "templateInserted": "Template inserted",
-      "procedureCallInserted": "Procedure call inserted into editor"
+      "procedureCallInserted": "Procedure call inserted into editor",
+      "queryInserted": "Query statement inserted into editor",
+      "ddlQueryInserted": "DDL query statement inserted into editor"
     },
     "action": {
       "newConnection": "+ New Connection",

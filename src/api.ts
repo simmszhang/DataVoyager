@@ -362,8 +362,8 @@ export const api = {
     invoke<ProcedureInfo[]>("list_procedures", { id, database }),
   listTriggers: (id: number, database: string) =>
     invoke<TriggerInfo[]>("list_triggers", { id, database }),
-  buildTableSelect: (connId: number, table: string) =>
-    invoke<string>("build_table_select", { id: connId, table }),
+  buildTableSelect: (connId: number, database: string, table: string) =>
+    invoke<string>("build_table_select", { id: connId, database, table }),
   executeQuery: (id: number, database: string | null, sql: string, confirmed: boolean) =>
     invoke<QueryOutput>("execute_query", { id, database, sql, confirmed }),
   executeQueryStream: (

@@ -605,3 +605,15 @@
   - src/components/SchemaTree.tsx:564 - 函数 DDL 模板添加 DETERMINISTIC 关键字
 - **优先级**: P1 - 模板不可用
 - **规模**: 小型 - 单行模板修改
+
+---
+
+### #80 视图 DDL 显示未格式化的单行 SQL ✅
+
+- **现象**: 右键视图节点点击"查看 DDL"，显示的 SQL 是未格式化的单行文本，难以阅读
+- **原因**: SHOW CREATE VIEW 返回的 DDL 是压缩的单行文本，没有换行和缩进
+- **修复**:
+  - src-tauri/src/commands.rs:1259-1289 - 添加 ormat_sql 辅助函数，在主要关键字（SELECT/FROM/WHERE/JOIN 等）前添加换行
+  - src-tauri/src/commands.rs:1326-1330 - 在返回 DDL 前调用 ormat_sql 进行格式化
+- **优先级**: P2 - 改善用户体验
+- **规模**: 小型 - 单个格式化函数

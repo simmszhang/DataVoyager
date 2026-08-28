@@ -1254,37 +1254,6 @@ pub async fn show_create_table(
 }
 
 /// 简单的 SQL 格式化：在主要关键字后添加换行和缩进
-fn format_sql(sql: &str) -> String {
-    // 关键字列表（需要在其前面换行的）
-    let keywords = [
-        " SELECT ", " FROM ", " WHERE ", " GROUP BY ", " HAVING ", 
-        " ORDER BY ", " LIMIT ", " JOIN ", " LEFT JOIN ", " RIGHT JOIN ",
-        " INNER JOIN ", " OUTER JOIN ", " ON ", " UNION ", " AS "
-    ];
-    
-    let mut result = sql.to_string();
-    
-    // 在主要关键字前添加换行
-    for keyword in &keywords {
-        // 保持大小写不敏感匹配
-        let pattern = keyword.to_uppercase();
-        let mut parts = Vec::new();
-        let upper = result.to_uppercase();
-        let mut last_pos = 0;
-        
-        while let Some(pos) = upper[last_pos..].find(&pattern) {
-            let actual_pos = last_pos + pos;
-            parts.push(&result[last_pos..actual_pos]);
-            parts.push("\n");
-            last_pos = actual_pos;
-        }
-        parts.push(&result[last_pos..]);
-        result = parts.concat();
-    }
-    
-    result
-}
-
 #[tauri::command]
 pub async fn show_create_object(
     state: State<'_, Arc<AppState>>,
@@ -1315,7 +1284,6 @@ pub async fn show_create_object(
     );
 
     Ok(sql)
-}
 }
 
 #[tauri::command]

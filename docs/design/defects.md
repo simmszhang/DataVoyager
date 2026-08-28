@@ -617,3 +617,28 @@
   - src-tauri/src/commands.rs:1326-1330 - 在返回 DDL 前调用 ormat_sql 进行格式化
 - **优先级**: P2 - 改善用户体验
 - **规模**: 小型 - 单个格式化函数
+
+### #81 查询数据/查看DDL功能执行SQL而非插入编辑器 ✅
+
+- **现象**: 
+  - 双击表节点 / 右键"查看 DDL" / 右键存储过程"执行" 等功能直接执行 SQL 并显示结果
+  - 用户无法看到实际执行的 SQL，也无法编辑后再执行
+  - 这不符合数据库客户端的标准交互模式
+- **原因**: 
+  - `show_create_table` 和 `show_create_object` 命令执行了 `SHOW CREATE` 查询并返回结果
+  - 而 `build_table_select` 和 `execute_procedure` 只生成 SQL 语句，行为不一致
+- **修复**:
+  - src-tauri/src/commands.rs:250-265 - `show_create_table` 只生成 `SHOW CREATE TABLE db.table;` 语句
+  - src-tauri/src/commands.rs:268-285 - `show_create_object` 只生成 `SHOW CREATE {TYPE} db.object;` 语句
+  - src-tauri/src/commands.rs:288-307 - `build_table_select` 接受 database 参数，生成 `SELECT * FROM db.table LIMIT 1000;`
+  - src-tauri/src/commands.rs:310-326 - `execute_procedure` 生成 `CALL db.procedure();`
+  - src/api.ts:74 - 更新 `buildTableSelect` API 签名，添加 database 参数
+  - src/App.tsx:160-195 - 更新所有处理函数，传递 database 参数并更新状态栏提示
+  - src/locales/zh-CN.json:28-29 - 添加新的状态栏提示文案
+  - src/locales/en-US.json:28-29 - 添加英文翻译
+- **影响**: 
+  - 所有 DDL 查看、数据查询、存储过程调用功能现在只生成 SQL 并插入编辑器
+  - 用户可以查看、修改 SQL 后再手动执行（F5）
+  - 符合标准数据库客户端的交互习惯
+- **优先级**: P1 - 核心交互体验问题
+- **规模**: 小型 - 修改命令返回值逻辑，统一行为

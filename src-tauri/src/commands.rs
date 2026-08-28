@@ -1256,6 +1256,38 @@ pub async fn show_create_table(
     Err(DbError::Other("No CREATE TABLE result".into()))
 }
 
+/// 简单的 SQL 格式化：在主要关键字后添加换行和缩进
+fn format_sql(sql: &str) -> String {
+    // 关键字列表（需要在其前面换行的）
+    let keywords = [
+        " SELECT ", " FROM ", " WHERE ", " GROUP BY ", " HAVING ", 
+        " ORDER BY ", " LIMIT ", " JOIN ", " LEFT JOIN ", " RIGHT JOIN ",
+        " INNER JOIN ", " OUTER JOIN ", " ON ", " UNION ", " AS "
+    ];
+    
+    let mut result = sql.to_string();
+    
+    // 在主要关键字前添加换行
+    for keyword in &keywords {
+        // 保持大小写不敏感匹配
+        let pattern = keyword.to_uppercase();
+        let mut parts = Vec::new();
+        let upper = result.to_uppercase();
+        let mut last_pos = 0;
+        
+        while let Some(pos) = upper[last_pos..].find(&pattern) {
+            let actual_pos = last_pos + pos;
+            parts.push(&result[last_pos..actual_pos]);
+            parts.push("\n");
+            last_pos = actual_pos;
+        }
+        parts.push(&result[last_pos..]);
+        result = parts.concat();
+    }
+    
+    result
+}
+
 #[tauri::command]
 pub async fn show_create_object(
     state: State<'_, Arc<AppState>>,
@@ -1295,17 +1327,23 @@ pub async fn show_create_object(
 
     // 提取第一个结果集的第一行
     // TABLE/VIEW: 第2列是 DDL
-    // FUNCTION/PROCEDURE: 第3列是 DDL (第2列是 sql_mode)
+    // FUNCTION/PROCEDURE/TRIGGER: 第3列是 DDL (第2列是 sql_mode)
     if let Some(result_set) = output.first_result_set() {
         if let Some(row) = result_set.rows.first() {
-            let ddl_column = if object_type.to_uppercase() == "FUNCTION" || object_type.to_uppercase() == "PROCEDURE" {
+            let object_type_upper = object_type.to_uppercase();
+            let ddl_column = if object_type_upper == "FUNCTION" 
+                || object_type_upper == "PROCEDURE" 
+                || object_type_upper == "TRIGGER" {
                 2 // 第3列 (index 2)
             } else {
                 1 // 第2列 (index 1)
             };
             
             if let Some(cell) = row.get(ddl_column) {
-                return Ok(cell.to_display_string());
+                let ddl = cell.to_display_string();
+                // 简单格式化：在关键字后添加换行
+                let formatted = format_sql(&ddl);
+                return Ok(formatted);
             }
         }
     }
